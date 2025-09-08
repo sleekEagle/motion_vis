@@ -1,69 +1,87 @@
-import pandas as pd
-import os
-import pandas as pd
-import os
-import subprocess
-from tqdm import tqdm
-import yt_dlp 
+import torch
+import json
+from torchvision.transforms import Compose, Lambda
+from torchvision.transforms._transforms_video import (
+    CenterCropVideo,
+    NormalizeVideo,
+)
+from pytorchvideo.data.encoded_video import EncodedVideo
+from pytorchvideo.transforms import (
+    ApplyTransformToKey,
+    ShortSideScale,
+    UniformTemporalSubsample,
+)
+from pytorchvideo.transforms import augmentations
+from typing import Dict
 
-# Define paths
-# annotation_dir = r'C:\Users\lahir\data\kinetics400\annotations'
-# output_dir = r'C:\Users\lahir\data\kinetics400'
-# target_classes = ["applauding"]  # Your chosen classes
+device = "cpu"
 
-# # Filter validation or test set annotations
-# for split in ["val"]:
-#     csv_file = os.path.expanduser(f"{annotation_dir}/{split}.csv")
-#     df = pd.read_csv(csv_file)
-#     filtered_df = df[df["label"].isin(target_classes)]
-#     os.makedirs(output_dir, exist_ok=True)
-#     filtered_df.to_csv(f"{output_dir}/{split}_filtered.csv", index=False)
-#     print(f"Filtered {split} set: {len(filtered_df)} videos for {target_classes}")
+# Pick a pretrained model and load the pretrained weights
+model_name = "slowfast_r50"
+model = torch.hub.load("facebookresearch/pytorchvideo", model=model_name, pretrained=True)
+
+# Set to eval mode and move to desired device
+model = model.to(device)
+model = model.eval()
 
 
+with open(r'C:\Users\lahir\code\motion_vis\dataloaders\kinetics_classnames.json', "r") as f:
+    kinetics_classnames = json.load(f)
 
-def download_video(youtube_id, start_time, end_time, output_path, class_name):
-    """Download and trim a single video clip using youtube-dl and ffmpeg."""
-    output_file = os.path.join(output_path, class_name, f"{youtube_id}_{start_time:06d}_{end_time:06d}.mp4")
-    if os.path.exists(output_file):
-        print(f"Video {output_file} already exists, skipping.")
-        return True
-    ydl_opts = {
-        "format": "bestvideo[height<=480]+bestaudio/best[height<=480]",
-        "outtmpl": output_file + ".%(ext)s",
-        "quiet": True,
-        "merge_output_format": "mp4"
-    }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([f"https://www.youtube.com/watch?v={youtube_id}"])
-        # Trim video to specified start/end times
-        subprocess.run([
-            "ffmpeg", "-y", "-i", f"{output_file}.mp4", "-ss", str(start_time), "-to", str(end_time),
-            "-c", "copy", output_file
-        ], check=True, capture_output=True)
-        os.remove(f"{output_file}.mp4")  # Remove untrimmed file
-        return True
-    except Exception as e:
-        print(f"Failed to download {youtube_id}: {e}")
-        return False
+# Create an id to label name mapping
+kinetics_id_to_classname = {}
+for k, v in kinetics_classnames.items():
+    kinetics_id_to_classname[v] = str(k).replace('"', "")
 
-# Define paths
-output_dir = os.path.expanduser(r'C:\Users\lahir\data\kinetics400')
-annotation_dir = os.path.expanduser(r'C:\Users\lahir\data\kinetics400')
-split = "val"  # Change to "test" for test set
+####################
+# SlowFast transform
+####################
 
-# Load (filtered) annotations
-csv_file = f"{annotation_dir}/{split}_filtered.csv"
-df = pd.read_csv(csv_file)
+side_size = 256
+mean = [0.45, 0.45, 0.45]
+std = [0.225, 0.225, 0.225]
+crop_size = 256
+num_frames = 32
+sampling_rate = 2
+frames_per_second = 30
+alpha = 4
 
-# Download videos
-for _, row in tqdm(df.iterrows(), total=len(df), desc=f"Downloading {split} videos"):
-    youtube_id = row["youtube_id"]
-    start_time = row["time_start"]
-    end_time = row["time_end"]
-    class_name = row["label"]
-    class_dir = os.path.join(output_dir, split, class_name)
-    os.makedirs(class_dir, exist_ok=True)
-    download_video(youtube_id, start_time, end_time, output_dir, class_name)
+class PackPathway(torch.nn.Module):
+    """
+    Transform for converting video frames as a list of tensors.
+    """
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, frames: torch.Tensor):
+        fast_pathway = frames
+        # Perform temporal sampling from the fast pathway.
+        slow_pathway = torch.index_select(
+            frames,
+            1,
+            torch.linspace(
+                0, frames.shape[1] - 1, frames.shape[1] // alpha
+            ).long(),
+        )
+        frame_list = [slow_pathway, fast_pathway]
+        return frame_list
+
+transform =  ApplyTransformToKey(
+    key="video",
+    transform=Compose(
+        [
+            UniformTemporalSubsample(num_frames),
+            Lambda(lambda x: x/255.0),
+            NormalizeVideo(mean, std),
+            ShortSideScale(
+                size=side_size
+            ),
+            CenterCropVideo(crop_size),
+            PackPathway()
+        ]
+    ),
+)
+
+# The duration of the input clip is also specific to the model.
+clip_duration = (num_frames * sampling_rate)/frames_per_second
 
