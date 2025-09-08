@@ -85,3 +85,34 @@ transform =  ApplyTransformToKey(
 # The duration of the input clip is also specific to the model.
 clip_duration = (num_frames * sampling_rate)/frames_per_second
 
+
+video_path = r'C:\Users\lahir\data\kinetics400\samples\archery.mp4'
+
+# Select the duration of the clip to load by specifying the start and end duration
+# The start_sec should correspond to where the action occurs in the video
+start_sec = 0
+end_sec = start_sec + clip_duration
+
+# Initialize an EncodedVideo helper class
+video = EncodedVideo.from_path(video_path)
+
+# Load the desired clip
+video_data = video.get_clip(start_sec=start_sec, end_sec=end_sec)
+
+# Apply a transform to normalize the video input
+video_data = transform(video_data)
+
+# Move the inputs to the desired device
+inputs = video_data["video"]
+inputs = [i.to(device)[None, ...] for i in inputs]
+
+preds = model(inputs)
+
+
+post_act = torch.nn.Softmax(dim=1)
+preds = post_act(preds)
+pred_classes = preds.topk(k=5).indices
+
+# Map the predicted classes to the label names
+pred_class_names = [kinetics_id_to_classname[int(i)] for i in pred_classes[0]]
+print("Predicted labels: %s" % ", ".join(pred_class_names))
