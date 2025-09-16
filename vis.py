@@ -119,7 +119,11 @@ def test_model():
     pred_labels = []
     for i in range(len(cls_df)):
         print(f'Processing video {i+1}/{len(cls_df)}',end='\r')
-        inputs, class_id, class_name = get_input(i)
+        try:
+            inputs, class_id, class_name = get_input(i)
+        except Exception as e:
+            print(f'Error processing video {i}: {e}')
+            continue
 
         preds = model(inputs)
 
