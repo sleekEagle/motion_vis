@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import torch
 import json
+import urllib
 from torchvision.transforms import Compose, Lambda
 from torchvision.transforms._transforms_video import (
     CenterCropVideo,
@@ -19,35 +20,48 @@ from pytorchvideo.transforms import (
 from typing import Dict
 
 
-root = r'C:\Users\lahir\data\k400'
+root = r'C:\Users\lahir\data\kinetics400\val\val_256'
 device = "cpu"
 
-csv_path = os.path.join(root, 'val.csv')
-df = pd.read_csv(csv_path)
-cls_df = df
-# df[df['label']=='archery']
+json_url = "https://dl.fbaipublicfiles.com/pyslowfast/dataset/class_names/kinetics_classnames.json"
+json_filename = "kinetics_classnames.json"
+try: urllib.URLopener().retrieve(json_url, json_filename)
+except: urllib.request.urlretrieve(json_url, json_filename)
+with open(json_filename, "r") as f:
+    kinetics_classnames_ = json.load(f)
+kinetics_classnames = {}
+for k, v in kinetics_classnames_.items():
+    s = str(k).replace('"', "")
+    s = s.replace(' ', '_')
+    if 'passing' in s:
+        pass
+    kinetics_classnames[s] = v
+
+# List all directories in the root path
+data_list = []
+dirs = [d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))]
+for d in dirs:
+    label = kinetics_classnames[d]
+    dir_path = os.path.join(root, d)
+    files = [f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f))]
+    for f in files:
+        data_list.append({'video_path': os.path.join(dir_path, f), 'label': label, 'class': d})
+
+
 
 
 # Pick a pretrained model and load the pretrained weights
 model_name = "x3d_s"
 model = torch.hub.load("facebookresearch/pytorchvideo", model=model_name, pretrained=True)
-
 # Set to eval mode and move to desired device
 model = model.to(device)
 model = model.eval()
 
 
-with open("dataloaders/kinetics_classnames.json", "r") as f:
-    kinetics_classnames_ = json.load(f)
-
 # Create an id to label name mapping
 kinetics_id_to_classname = {}
-kinetics_classnames = {}
-for k, v in kinetics_classnames_.items():
-    kinetics_id_to_classname[v] = str(k).strip('"\'')
-    kinetics_classnames[str(k).strip('\'"')] = v
-
-
+for k, v in kinetics_classnames.items():
+    kinetics_id_to_classname[v] = str(k).replace('"', "")
 
 ####################
 # SlowFast transform
@@ -102,36 +116,39 @@ start_sec = 0
 end_sec = start_sec + clip_duration
 
 def get_input(i):
-    yt_id = cls_df.iloc[i]['youtube_id']
-    class_name = cls_df.iloc[i]['label']
-    class_id = kinetics_classnames[class_name]
-    time_start = int(cls_df.iloc[i]['time_start'])
-    time_end = int(cls_df.iloc[i]['time_end'])
-    video_path = os.path.join(root, f'{yt_id}_{time_start:06d}_{time_end:06d}.mp4')
-    video = EncodedVideo.from_path(video_path)
+    path = data_list[i]['video_path']
+    class_name = data_list[i]['class']
+    class_id = data_list[i]['label']
+    video = EncodedVideo.from_path(path)
     video_data = video.get_clip(start_sec=start_sec, end_sec=end_sec)
     video_data = transform(video_data)
     inputs = video_data["video"][None, ...]
     return inputs, class_id, class_name
 
+
+'''
+Accuracy: 0.6269
+'''
+
 def test_model():
     gt_labels = []
     pred_labels = []
-    for i in range(len(cls_df)):
-        print(f'Processing video {i+1}/{len(cls_df)}',end='\r')
+    n_missing = 0
+    for i in range(len(data_list)):
+        print(f'Processing video {i+1}/{len(data_list)}',end='\r')
         try:
             inputs, class_id, class_name = get_input(i)
         except Exception as e:
             print(f'Error processing video {i}: {e}')
-            continue
+            n_missing += 1
 
         preds = model(inputs)
 
         post_act = torch.nn.Softmax(dim=1)
         preds = post_act(preds)
-        pred_classes = preds.topk(k=5).indices
+        pred_classes = preds.topk(k=5).indices[0]
         gt_labels.extend([class_id])
-        pred_labels.extend([pred_classes[0][0].item()])
+        pred_labels.extend([pred_classes[0].item()])
 
         # # Map the predicted classes to the label names
         # pred_class_names = [kinetics_id_to_classname[int(i)] for i in pred_classes[0]]
@@ -143,6 +160,7 @@ def test_model():
     pred_labels = np.array(pred_labels)
     accuracy = (gt_labels == pred_labels).sum()/len(gt_labels)
     print(f'Accuracy: {accuracy:.4f}')
+    print(f'Missing videos: {n_missing} outpf {len(data_list)} ')
 
 
 def vis_model():
