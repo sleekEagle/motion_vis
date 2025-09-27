@@ -322,13 +322,5 @@ def frame_motion_importance():
             # No writeheader() when appending
             writer.writerows([imp])
 
-
-        
-
-
-
-        pass
-
-
 if __name__ == "__main__":
     frame_motion_importance()
