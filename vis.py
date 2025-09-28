@@ -286,6 +286,7 @@ def frame_motion_importance():
     skip = False
     out_path = r'C:\Users\lahir\data\kinetics400\val\tmp_imp.csv'
     for i in range(len(data_list)):
+        if i< 2696: continue
         print(f'Processing video {i+1}/{len(data_list)}',end='\r')
         cls = data_list[i]['class']
         if not last_cls:
@@ -322,5 +323,17 @@ def frame_motion_importance():
             # No writeheader() when appending
             writer.writerows([imp])
 
+
+def process_motion_data_df():
+    path = r'C:\Users\lahir\data\kinetics400\val\tmp_imp.csv'
+    df = pd.read_csv(path)
+    df['frozen_logits'] = df['frozen_logits'].apply(lambda x: [float(i) for i in x.strip('[]').split(',')])
+    df['max_frozen'] = df['frozen_logits'].apply(lambda x: np.array([float(i) for i in x.strip('[]').split(',')]).max())
+    df['video_motion_importance'] = ((df['original_logit'] - df['max_frozen'])/df['original_logit']).clip(lower=0)
+    df.to_csv(r'C:\Users\lahir\data\kinetics400\val\tmp_imp_processed.csv')
+
+
+    pass
+
 if __name__ == "__main__":
-    frame_motion_importance()
+    process_motion_data_df()
