@@ -26,6 +26,7 @@ import av
 from huggingface_hub import hf_hub_download
 from transformers import AutoImageProcessor, VideoMAEModel
 from transformers import BatchFeature
+from einops import rearrange
 
 
 root = r'C:\Users\lahir\data\kinetics400\val\val_256'
@@ -79,9 +80,16 @@ for d in dirs:
 model from : 
 https://huggingface.co/MCG-NJU/videomae-base-finetuned-kinetics
 '''
-processor = VideoMAEImageProcessor.from_pretrained("MCG-NJU/videomae-base-finetuned-kinetics")
-model = VideoMAEForVideoClassification.from_pretrained("MCG-NJU/videomae-base-finetuned-kinetics")
-image_processor = AutoImageProcessor.from_pretrained("MCG-NJU/videomae-base")
+# processor = VideoMAEImageProcessor.from_pretrained("MCG-NJU/videomae-base-finetuned-kinetics")
+# model = VideoMAEForVideoClassification.from_pretrained("MCG-NJU/videomae-base-finetuned-kinetics")
+# image_processor = AutoImageProcessor.from_pretrained("MCG-NJU/videomae-base")
+
+'''
+model from : https://huggingface.co/google/vivit-b-16x2-kinetics400
+'''
+from transformers import VivitImageProcessor, VivitForVideoClassification
+image_processor = VivitImageProcessor.from_pretrained("google/vivit-b-16x2-kinetics400")
+model = VivitForVideoClassification.from_pretrained("google/vivit-b-16x2-kinetics400")
 
 
 
@@ -92,13 +100,25 @@ def get_input(i):
 
     try:
         container = av.open(path)
-        video = read_video_pyav(container,clip_len=16)
+        video = read_video_pyav(container,clip_len=32)
     except Exception as e:
         print(f'Error processing video {i}: {e}')
 
     inputs = image_processor(list(video), return_tensors="pt")
 
     return inputs, class_id, class_name
+
+
+def get_input_from_path(path):
+    try:
+        container = av.open(path)
+        video = read_video_pyav(container,clip_len=32)
+    except Exception as e:
+        print(f'Error processing video {get_input_from_path}: {e}')
+
+    inputs = image_processor(list(video), return_tensors="pt")
+
+    return inputs
 
 '''
 Accuracy: 0.6269
@@ -120,7 +140,8 @@ def test_model():
         outputs = model(**inputs)
         logits = outputs.logits
         predicted_class_idx = logits.argmax(-1).item()
-        print(f'GT class: {class_name} Predicted class: {model.config.id2label[predicted_class_idx]}')
+        # print(f'GT class: {class_name} Predicted class: {model.config.id2label[predicted_class_idx]}')
+        print(f'GT class: {class_id} Predicted class: {predicted_class_idx}')
 
         gt_labels.extend([class_id])
         pred_labels.extend([predicted_class_idx])
@@ -335,5 +356,89 @@ def process_motion_data_df():
 
     pass
 
+activations = {}
+def get_activation(name):
+    def hook(model, input, output):
+        activations[name] = output.detach()
+    return hook
+
+import torch.nn.functional as F
+
+def generate_gradcam():
+    out_path = r'C:\Users\lahir\data\kinetics400\val\gradcam'
+    path = r'C:\Users\lahir\data\kinetics400\val\tmp_imp.csv'
+    df = pd.read_csv(path)
+
+    model.vivit.encoder.layer[11].output.register_forward_hook(get_activation('layer11'))
+
+    for i in range(len(df)):
+        path = df['path'].iloc[1]
+        inputs = get_input_from_path(path)
+
+        #***calculate gradcam***
+        outputs = model(**inputs)
+        act = activations['layer11']
+        act = rearrange(act[:,1:,:] , 'b (t w h) f -> b t h w f', t=16, h=14, w=14)
+        model.zero_grad()
+        outputs.logits[0,outputs.logits.argmax(-1)].backward()
+        grad = model.vivit.encoder.layer[11].output.dense.weight.grad
+        grad_ch = grad.mean(dim=1)
+        gradcam = (act * grad_ch[None,None,None,None,:]).mean(dim=-1)
+        #***********************
+
+        play_tensor_video_opencv(inputs['pixel_values'][0], fps=2)
+        
+
+        gradcam_int = F.interpolate(gradcam.unsqueeze(1),
+                                size=(32,224,224),           # Target size
+                                mode='trilinear',         # 'nearest' | 'bilinear' | 'bicubic'
+                                align_corners=False      # Set True for some modes
+                            ).squeeze(dim=1)
+        gradcam_int = (gradcam_int - gradcam_int.min())/(gradcam_int.max() - gradcam_int.min() + 1e-5)
+        gradcam_int = (1-gradcam_int)
+        gradcam_int = (gradcam_int - gradcam_int.min())/(gradcam_int.max() - gradcam_int.min() + 1e-5)
+
+
+        img = inputs['pixel_values'][0].permute(0,2,3,1).numpy()
+        img = np.uint8((img - img.min())/(img.max() - img.min() + 1e-5)*255)
+
+        transformed = np.uint8(gradcam_int*255)
+        h_col = np.concatenate([cv2.applyColorMap(img, cv2.COLORMAP_JET)[None,:] for img in list(transformed[0])],axis=0)
+
+        final_img = cv2.addWeighted(img, 0.6, h_col, 0.4, 0)
+        final_img = torch.tensor(final_img).permute(0,3,1,2)
+
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(6, 6))
+        plt.imshow(final_img.permute(0,2,3,1).numpy()[0,:])
+        plt.title('224x224 Array')
+        plt.axis('off')  # Hide axes
+        plt.show()
+
+        # plt.figure(figsize=(6, 6))
+        # plt.imshow(transformed[0,0,:],cmap='gray')
+        # plt.title('224x224 Array')
+        # plt.axis('off')  # Hide axes
+        # plt.show()
+
+
+        play_tensor_video_opencv(final_img, fps=2)
+
+
+
+
+        gradcam_int = (gradcam_int*1.3)**5
+
+
+
+
+        play_tensor_video_opencv(gradcam_int.permute(1,0,2,3).repeat(1,3,1,1), fps=2)
+
+
+
+
+    pass
+
+
 if __name__ == "__main__":
-    process_motion_data_df()
+    generate_gradcam()
