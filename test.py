@@ -1,68 +1,53 @@
-# check_cuda.py
 import torch
-import subprocess
-import os
-import glob
+import torch.nn as nn
 
-def check_cuda_windows():
-    print("=== CUDA Detection on Windows ===\n")
-    
-    # 1. Check PyTorch CUDA availability
-    print("1. PyTorch CUDA Info:")
-    print(f"   CUDA available: {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        print(f"   CUDA version: {torch.version.cuda}")
-        print(f"   GPU device: {torch.cuda.get_device_name(0)}")
-        print(f"   CUDA devices: {torch.cuda.device_count()}")
-    else:
-        print("   ❌ CUDA not available in PyTorch")
-    
-    # 2. Check common nvcc locations
-    print("\n2. Searching for nvcc...")
-    cuda_paths = [
-        r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA",
-        r"C:\CUDA",
-        os.environ.get('CUDA_PATH', ''),
-        os.environ.get('CUDA_PATH_V11_8', ''),
-        os.environ.get('CUDA_PATH_V12_0', ''),
-        os.environ.get('CUDA_PATH_V12_3', ''),
-    ]
-    
-    for path in cuda_paths:
-        if path and os.path.exists(path):
-            nvcc_path = os.path.join(path, "bin", "nvcc.exe")
-            if os.path.exists(nvcc_path):
-                print(f"   ✅ Found nvcc at: {nvcc_path}")
-                try:
-                    result = subprocess.run([nvcc_path, "--version"], 
-                                          capture_output=True, text=True)
-                    if result.returncode == 0:
-                        lines = result.stdout.split('\n')
-                        for line in lines[:3]:  # Show first 3 lines
-                            if line.strip():
-                                print(f"      {line}")
-                        break
-                except Exception as e:
-                    print(f"   ❌ Error running nvcc: {e}")
-            else:
-                print(f"   📁 CUDA path exists: {path} (but nvcc not found)")
-    
-    # 3. Check environment variables
-    print("\n3. Environment Variables:")
-    cuda_vars = {k: v for k, v in os.environ.items() if 'CUDA' in k.upper()}
-    for var, value in cuda_vars.items():
-        print(f"   {var}: {value}")
-    
-    # 4. Check if CUDA DLLs are available
-    print("\n4. CUDA DLL Check:")
-    try:
-        cudart_path = glob.glob(r"C:\Windows\System32\cudart*.dll")
-        if cudart_path:
-            print(f"   ✅ CUDA runtime DLLs found: {len(cudart_path)}")
-        else:
-            print("   ❌ No CUDA runtime DLLs found in System32")
-    except:
-        pass
+class Layer1(nn.Module):
+    def __init__(self):
+        super(Layer1, self).__init__()
 
-if __name__ == "__main__":
-    check_cuda_windows()
+    def forward(self, t):
+        out = t**2
+        return out
+    
+class Layer2(nn.Module):
+    def __init__(self):
+        super(Layer2, self).__init__()
+        self.param = nn.Parameter(torch.tensor(3,dtype=torch.float32),requires_grad=True) 
+
+    def forward(self, t):
+        out = (self.param * t)**3
+        return out.sum()
+    
+class model(nn.Module):
+    def __init__(self):
+        super(model, self).__init__()
+        self.layer1 = Layer1()
+        self.layer2 = Layer2()
+
+        
+        self.layer1.register_forward_hook(self.save_activations)
+        self.layer1.register_backward_hook(self.save_gradients)
+
+    def save_activations(self, module, input, output):
+        self.activations = output
+
+    def save_gradients(self, module, grad_in, grad_out):
+        self.gradients = grad_out
+
+    def forward(self, t):
+        out = self.layer1(t)
+        out = self.layer2(out)
+        return out
+    
+model = model()  # Use GPU if available
+
+t = torch.tensor([2,4], dtype=torch.float32, requires_grad=True)
+output = model(t)
+
+model.zero_grad()
+output.backward()
+
+
+activations = model.activations
+gradients = model.gradients 
+model.layer2.param.grad
