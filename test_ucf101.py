@@ -3,6 +3,8 @@ import json
 from models.resnet3d.main import generate_model, get_inference_utils, resume_model
 from models.resnet3d.model import generate_model, make_data_parallel
 from pathlib import Path
+import torch
+import models.resnet3d
 
 #read model options
 opt_path = "models/r3d/ucf101.json"
@@ -20,6 +22,23 @@ for attribute in dir(model_opt):
         setattr(model_opt, str(attribute), Path(getattr(model_opt, str(attribute))))
 inference_loader, inference_class_names = get_inference_utils(model_opt)
 class_labels_map = {v.lower(): k for k, v in inference_class_names.items()}
+
+inputs, targets = iter(inference_loader).__next__()
+video_size = inputs[[0]].shape
+transform = inference_loader.dataset.spatial_transform
+
+_transforms = transform.transforms
+idx = [type(i) for i in _transforms].index(resnet3d.spatial_transforms.Normalize)
+normalize = _transforms[idx]
+mean = torch.tensor(normalize.mean)
+std = torch.tensor(normalize.std)
+
+unnormalize = transforms.Compose(
+    [
+        Normalize((-mean / std).tolist(), (1 / std).tolist()),
+        ToPILImage(),
+    ]
+)
 
 pass
 
