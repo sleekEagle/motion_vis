@@ -27,6 +27,9 @@ from huggingface_hub import hf_hub_download
 from transformers import AutoImageProcessor, VideoMAEModel
 from transformers import BatchFeature
 from einops import rearrange
+import torch.nn as nn
+import matplotlib.pyplot as plt
+
 
 
 root = r'C:\Users\lahir\data\kinetics400\val\val_256'
@@ -83,6 +86,7 @@ https://huggingface.co/MCG-NJU/videomae-base-finetuned-kinetics
 # processor = VideoMAEImageProcessor.from_pretrained("MCG-NJU/videomae-base-finetuned-kinetics")
 # model = VideoMAEForVideoClassification.from_pretrained("MCG-NJU/videomae-base-finetuned-kinetics")
 # image_processor = AutoImageProcessor.from_pretrained("MCG-NJU/videomae-base")
+# CLIP_LEN = 16
 
 '''
 model from : https://huggingface.co/google/vivit-b-16x2-kinetics400
@@ -90,8 +94,30 @@ model from : https://huggingface.co/google/vivit-b-16x2-kinetics400
 from transformers import VivitImageProcessor, VivitForVideoClassification
 image_processor = VivitImageProcessor.from_pretrained("google/vivit-b-16x2-kinetics400")
 model = VivitForVideoClassification.from_pretrained("google/vivit-b-16x2-kinetics400")
+CLIP_LEN = 32
 
+class GradcamModel(nn.Module):
+    def __init__(self, model):
+        super(GradcamModel, self).__init__()
+        self.model = model
 
+        self.model.vivit.encoder.layer[10].output.register_forward_hook(self.save_activations)
+        self.model.vivit.encoder.layer[10].output.register_backward_hook(self.save_gradients)
+        # self.model.videomae.encoder.layer[10].output.register_forward_hook(self.save_activations)
+        # self.model.videomae.encoder.layer[10].output.register_backward_hook(self.save_gradients)
+
+    def save_activations(self, module, input, output):
+        self.activations = output
+
+    def save_gradients(self, module, grad_in, grad_out):
+        # grad_out[0][0,1:,:].min(), grad_out[0][0,1:,:].max()s
+        self.gradients = grad_out
+
+    def forward(self, x):
+        out = self.model(**x)
+        return out
+    
+model_dc = GradcamModel(model)  
 
 def get_input(i):
     path = data_list[i]['video_path']
@@ -100,7 +126,7 @@ def get_input(i):
 
     try:
         container = av.open(path)
-        video = read_video_pyav(container,clip_len=32)
+        video = read_video_pyav(container,clip_len=CLIP_LEN)
     except Exception as e:
         print(f'Error processing video {i}: {e}')
 
@@ -112,7 +138,7 @@ def get_input(i):
 def get_input_from_path(path):
     try:
         container = av.open(path)
-        video = read_video_pyav(container,clip_len=32)
+        video = read_video_pyav(container,clip_len=CLIP_LEN)
     except Exception as e:
         print(f'Error processing video {get_input_from_path}: {e}')
 
@@ -356,64 +382,77 @@ def process_motion_data_df():
 
     pass
 
-activations = {}
-def get_activation(name):
-    def hook(model, input, output):
-        activations[name] = output.detach()
-    return hook
+activations_dict = None
+def save_activations(self, module, input, output):
+    activations_dict = output
+
+grad_dict = None
+def save_gradients(self, module, grad_in, grad_out):
+    grad_dict = grad_out
 
 import torch.nn.functional as F
 
 def generate_gradcam():
-    out_path = r'C:\Users\lahir\data\kinetics400\val\gradcam'
-    path = r'C:\Users\lahir\data\kinetics400\val\tmp_imp.csv'
-    df = pd.read_csv(path)
-
-    model.vivit.encoder.layer[11].output.register_forward_hook(get_activation('layer11'))
-
-    for i in range(len(df)):
-        path = df['path'].iloc[1]
-        inputs = get_input_from_path(path)
+    # out_path = r'C:\Users\lahir\data\kinetics400\val\gradcam'
+    # path = r'C:\Users\lahir\data\kinetics400\val\tmp_imp.csv'
+    # df = pd.read_csv(path)
+    
+    for i in range(len(data_list)):
+        inputs, class_id, class_name = get_input(i)
 
         #***calculate gradcam***
-        outputs = model(**inputs)
-        act = activations['layer11']
-        act = rearrange(act[:,1:,:] , 'b (t w h) f -> b t h w f', t=16, h=14, w=14)
-        model.zero_grad()
+        outputs = model_dc(inputs)
+        pred_l = outputs.logits.argmax(-1).item()
+        if class_id != pred_l:
+            print(f'Skipping video {i} as prediction is incorrect')
+            continue
+        act = model_dc.activations
+        act = rearrange(act[:,1:,:] , 'b (t h w) f -> b t h w f', t=int(CLIP_LEN/2), h=14, w=14)
+        model_dc.zero_grad()
         outputs.logits[0,outputs.logits.argmax(-1)].backward()
-        grad = model.vivit.encoder.layer[11].output.dense.weight.grad
-        grad_ch = grad.mean(dim=1)
-        gradcam = (act * grad_ch[None,None,None,None,:]).mean(dim=-1)
+
+        grad = model_dc.gradients[0]
+        grad = rearrange(grad[:,1:,:] , 'b (t h w) f -> b t h w f', t=int(CLIP_LEN/2), h=14, w=14)
+        grad = grad.mean(dim=(0,1,2,3),keepdim=True)
+
+        cam = act * grad
+        cam = F.relu(cam.sum(dim=-1))
+        cam = (cam - cam.min())/(cam.max() - cam.min() + 1e-5)
         #***********************
 
-        play_tensor_video_opencv(inputs['pixel_values'][0], fps=2)
+        # play_tensor_video_opencv(inputs['pixel_values'][0], fps=2)
         
 
-        gradcam_int = F.interpolate(gradcam.unsqueeze(1),
-                                size=(32,224,224),           # Target size
+        cam_int = F.interpolate(cam.unsqueeze(1),
+                                size=(CLIP_LEN,224,224),           # Target size
                                 mode='trilinear',         # 'nearest' | 'bilinear' | 'bicubic'
                                 align_corners=False      # Set True for some modes
                             ).squeeze(dim=1)
-        gradcam_int = (gradcam_int - gradcam_int.min())/(gradcam_int.max() - gradcam_int.min() + 1e-5)
-        gradcam_int = (1-gradcam_int)
-        gradcam_int = (gradcam_int - gradcam_int.min())/(gradcam_int.max() - gradcam_int.min() + 1e-5)
-
+        
+        # plt.figure(figsize=(6, 6))
+        # plt.imshow(cam_int[0,0,:].detach(),cmap='gray')
+        # plt.axis('off')  # Hide axes
+        # plt.show()
+        
+        
+        # gradcam_int = (cam_int - cam_int.min())/(gradcam_int.max() - gradcam_int.min() + 1e-5)
+        # gradcam_int = (1-gradcam_int)
+        # gradcam_int = (gradcam_int - gradcam_int.min())/(gradcam_int.max() - gradcam_int.min() + 1e-5)
 
         img = inputs['pixel_values'][0].permute(0,2,3,1).numpy()
         img = np.uint8((img - img.min())/(img.max() - img.min() + 1e-5)*255)
 
-        transformed = np.uint8(gradcam_int*255)
+        transformed = np.uint8(cam_int.detach().numpy()*255)
         h_col = np.concatenate([cv2.applyColorMap(img, cv2.COLORMAP_JET)[None,:] for img in list(transformed[0])],axis=0)
 
         final_img = cv2.addWeighted(img, 0.6, h_col, 0.4, 0)
         final_img = torch.tensor(final_img).permute(0,3,1,2)
 
-        import matplotlib.pyplot as plt
-        plt.figure(figsize=(6, 6))
-        plt.imshow(final_img.permute(0,2,3,1).numpy()[0,:])
-        plt.title('224x224 Array')
-        plt.axis('off')  # Hide axes
-        plt.show()
+        # plt.figure(figsize=(6, 6))
+        # plt.imshow(final_img.permute(0,2,3,1).numpy()[0,:])
+        # plt.title('224x224 Array')
+        # plt.axis('off')  # Hide axes
+        # plt.show()
 
         # plt.figure(figsize=(6, 6))
         # plt.imshow(transformed[0,0,:],cmap='gray')
@@ -427,12 +466,8 @@ def generate_gradcam():
 
 
 
-        gradcam_int = (gradcam_int*1.3)**5
 
-
-
-
-        play_tensor_video_opencv(gradcam_int.permute(1,0,2,3).repeat(1,3,1,1), fps=2)
+        # play_tensor_video_opencv(gradcam_int.permute(1,0,2,3).repeat(1,3,1,1), fps=2)
 
 
 
