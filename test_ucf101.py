@@ -86,7 +86,7 @@ for attribute in dir(model_opt):
         setattr(model_opt, str(attribute), Path(getattr(model_opt, str(attribute))))
 inference_loader, inference_class_names = get_inference_utils(model_opt)
 class_labels_map = {v.lower(): k for k, v in inference_class_names.items()}
-
+transform = inference_loader.dataset.spatial_transform
 
 def main():
     # inputs, targets = iter(inference_loader).__next__()
@@ -200,7 +200,6 @@ Acuracy : 0.9516516516516517
 
 def test():
     root = "C:\\Users\\lahir\\Downloads\\UCF101\\jpgs"
-    transform = inference_loader.dataset.spatial_transform
     n_samples = 0
     n_correct = 0
     for k in inference_class_names.keys():
@@ -221,7 +220,80 @@ def test():
                     n_correct += 1
     print(f'Acuracy : {n_correct/n_samples}')
 
+def copy_paste_frame(frames_in, src_idx, dst_idx):
+    frames = frames_in.clone()
+    frames[:,dst_idx,:] = frames[:,src_idx,:]
+    return frames
+
+def get_video_frame_motion_importance(video):
+    pred = model(video.unsqueeze(0))
+    pred_cls = torch.argmax(pred)
+    pred_l = pred[0,pred_cls]
+    n_frames = video.size(1)
+    logits_frame = []
+    for n in range(1, n_frames):
+        inputs = copy_paste_frame(video, n-1, n)
+        pred_ = model(inputs.unsqueeze(0))
+        pred_cls_ = torch.argmax(pred_)
+        pred_l_ = pred_[0,pred_cls_]
+        logits_frame.append(pred_l_.item())
+
+    out = {
+        'original_logit': pred_l.item(),
+        'logits_frame': logits_frame
+    }
+    return out
+
+def replace_video(input, src_idx):
+    frames = input.clone()
+    return frames[:,src_idx,:,:][:,None,:].repeat(1,input.size(1),1,1)
+
+def frozen_motion_importance(inputs,idx):
+    n_frames = inputs.size(1)
+    logits_list = []
+    for n in range(0, n_frames):
+        inputs_frozen = replace_video(inputs, n)
+        # play_tensor_video_opencv(inputs_frozen['pixel_values'][0], fps=2)
+        with torch.no_grad():
+            pred = model(inputs_frozen.unsqueeze(0))
+            pred_cls = torch.argmax(pred)
+            pred_l = pred[0,pred_cls]
+            logits_list.append(pred_l.item())
+    return logits_list
+
+def frame_motion_importance():
+    import csv
+
+    out_path = r'C:\Users\lahir\Downloads\UCF101\tmp_imp.csv'
+    root = "C:\\Users\\lahir\\Downloads\\UCF101\\jpgs"
+    for k in inference_class_names.keys():
+        print(f'Inferring class {k} out of {len(list(inference_class_names.keys()))}')
+        
+        class_path = os.path.join(root,inference_class_names[k])
+        dirs = [item.name for item in Path(class_path).iterdir() if item.is_dir()]
+
+        for d in dirs:
+            l = k
+            g = int(d.split('_')[2][1:])
+            c = int(d.split('_')[3][1:])
+            n=0
+            video = load_jpg_ucf101(l, g, c, n, inference_class_names, transform).transpose(0, 1)
+            with torch.inference_mode():
+                pred = model(video.unsqueeze(0)).cpu().numpy().argmax()
+                if int(pred) == k:
+                    imp = get_video_frame_motion_importance(video)
+                    frozen_logits = frozen_motion_importance(video,0)
+                    p = os.path.join(root,d)
+                    imp['path'] = p
+                    imp['frozen_logits'] = frozen_logits
+                    imp['orig_class'] = k
+                    with open(out_path, 'a', newline='', encoding='utf-8') as file:
+                        writer = csv.DictWriter(file, fieldnames=imp.keys())
+                        if os.path.getsize(out_path) == 0:
+                            writer.writeheader()
+                        writer.writerows([imp])
+
 if __name__ == '__main__':
-    gradcam()
+    frame_motion_importance()
 
 
