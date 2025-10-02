@@ -254,20 +254,50 @@ def gradcam_flow():
         inputs.requires_grad = True
         pred = model(inputs)
         pred_cls = torch.argmax(pred,dim=1)
-        model.zero_grad()
+        
         i=0
-        score = pred[i, pred_cls[i]]
-        score.backward()
-        slc,_ = torch.max(torch.abs(inputs.grad),dim=1)
-        slc = slc[i,1:,:]
-        slc = slc[:,:,:,None].repeat(1,1,1,2)
+        if cls[i]==pred_cls[i]:
+            model.zero_grad()
+            score = pred[i, pred_cls[i]]
+            score.backward()
+            slc,_ = torch.max(torch.abs(inputs.grad),dim=1)
+            slc = slc[i,1:,:]
+            slc = slc[:,:,:,None].repeat(1,1,1,2)
+            dPred_dF = slc * dI_dF
+            # dPred_dF = torch.mean(dPred_dF,dim=(1,2),keepdim=True)
+            flowcam = dPred_dF * flow
+            flowcam =  F.relu(torch.sum(flowcam,dim=3))
+            flowcam = (flowcam-flowcam.min())/(flowcam.max()-flowcam.min())
 
-        dPred_dF = slc * dI_dF
-        flowcam = F.relu(torch.sum(dPred_dF * flow,dim=-1))
+            video = inputs[0][:,1:,:]
+            video = video.permute(1,2,3,0).detach().numpy()
+            video = np.uint8((video - video.min())/(video.max() - video.min() + 1e-5)*255)
+
+            transformed = np.uint8(flowcam[None,:].detach().numpy()*255)
+            h_col = np.concatenate([cv2.applyColorMap(img, cv2.COLORMAP_JET)[None,:] for img in list(transformed[0])],axis=0)
+            final_img = cv2.addWeighted(video, 0.6, h_col, 0.4, 0)
+            final_img = torch.tensor(final_img).permute(0,3,1,2)
+            # play_tensor_video_opencv(final_img,fps=2)
+
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            video_writer = cv2.VideoWriter(os.path.join('C:\\Users\\lahir\\Downloads\\UCF101\\gradflow\\',f'{idx}.mp4'), fourcc, 2, (112, 112))
+            
+            # Write each frame
+            for i in range(final_img.size(0)):
+                frame = final_img[i].permute(1, 2, 0).numpy()
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                video_writer.write(frame)
+            video_writer.release()
+
+
+        # flowcam = F.relu(torch.sum(dPred_dF * flow,dim=-1))
         # flowcam = torch.sum(flowcam**2,dim=-1)
 
-        display_vid = torch.concat([inputs[0].permute(1,0,2,3)[1:],flowcam[:,None,:].repeat(1,3,1,1)],dim=-2)
-        play_tensor_video_opencv(display_vid,fps=2)
+        # v = (v-v.min())/(v.max()-v.min())
+        # flowcam = (flowcam-flowcam.min())/(flowcam.max()-flowcam.min())
+        # display_vid = torch.concat([inputs[0].permute(1,0,2,3)[1:],flowcam[:,None,:].repeat(1,3,1,1)],dim=-2)
+        # play_tensor_video_opencv(display_vid,fps=2)
+        # play_tensor_video_opencv(flowcam[:,None,:].repeat(1,3,1,1),fps=2)
     
 gmodel = GradcamModel(model)
 
