@@ -146,6 +146,129 @@ class GradcamModel(nn.Module):
         out = self.model(x)
         return out
     
+#video shape : 3, t , h , w
+#where t is the number of frames
+def calc_flow(video):
+    flow = torch.empty(0)
+    for i in range(0, video.size(1)-1):
+        f0_ = video[:,i+1,:,:].cpu().numpy().transpose(1, 2, 0)
+        f0_ = cv2.cvtColor(f0_, cv2.COLOR_BGR2GRAY)
+        f0_= cv2.normalize(f0_, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        if f0_.shape[0]!=112:
+            f0_ = cv2.resize(f0_, (112, 112), interpolation=cv2.INTER_LINEAR)
+        f1_ = video[:,i,:,:].cpu().numpy().transpose(1, 2, 0)
+        f1_ = cv2.cvtColor(f1_, cv2.COLOR_BGR2GRAY)
+        f1_= cv2.normalize(f1_, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        if f1_.shape[0]!=112:
+            f1_ = cv2.resize(f1_, (112, 112), interpolation=cv2.INTER_LINEAR)
+        flow_ = cv2.calcOpticalFlowFarneback(
+        f0_, f1_, None,
+        pyr_scale=0.5, levels=3, winsize=15, iterations=3,
+        poly_n=5, poly_sigma=1.2, flags=0
+        )
+        flow = torch.cat((flow,torch.tensor(flow_).unsqueeze(0)),dim=0)
+    return flow
+
+def warp_video(video, flow):
+    B, C, H, W = video.shape
+    flow = flow.permute(0,3,1,2)
+    grid_y, grid_x = torch.meshgrid(
+        torch.arange(0, H, device=video.device),
+        torch.arange(0, W, device=video.device),
+        indexing='ij'
+    )
+    # Normalize coordinates to [-1, 1]
+    grid_x = 2.0 * grid_x / (W - 1) - 1.0
+    grid_y = 2.0 * grid_y / (H - 1) - 1.0
+    # Expand to batch size
+    grid = torch.stack((grid_x, grid_y), dim=-1).unsqueeze(0).repeat(B, 1, 1, 1)
+
+    flow_normalized = torch.stack([
+        2.0 * flow[:, 0] / (W - 1),  # dx normalized
+        2.0 * flow[:, 1] / (H - 1)   # dy normalized
+    ], dim=-1).permute(0, 3, 1, 2)
+
+    new_grid = grid + flow_normalized.permute(0, 2, 3, 1)
+    warped = F.grid_sample(
+        video, 
+        new_grid, 
+        mode='bilinear', 
+        padding_mode='zeros',  # or 'border', 'reflection'
+        align_corners=True
+    )
+
+    return warped
+
+def input_flow_grad(video):
+    delta = 0.01 # ratio of the original flow to change
+    flow = calc_flow(video)
+    # warped = warp_video(video[:,1:,:].permute(1,0,2,3),flow)
+    # play_tensor_video_opencv(warped,fps=2)
+    # play_tensor_video_opencv(video[:,1:,:].permute(1,0,2,3),fps=2)
+    f_delta = torch.ones_like(flow) * delta
+
+    delta_x = f_delta.clone()
+    delta_x[:,:,:,1] = 0
+    delta_y = f_delta.clone()
+    delta_y[:,:,:,0] = 0
+
+    v = video[:,:-1,:].permute(1,0,2,3)
+    warped_x = warp_video(v, flow+delta_x)
+    warped_y = warp_video(v, flow+delta_y)
+
+    v1 = video[:,1:,:].permute(1,0,2,3)
+    dI_x = (warped_x - v1) / delta_x[:,:,:,0][:,None,:,:]
+    dI_y = (warped_y - v1) / delta_y[:,:,:,1][:,None,:,:]
+
+    d = torch.concat([dI_x[:,:,:,:,None],dI_y[:,:,:,:,None]],dim=-1)
+    d = torch.max(d,dim=1)[0]
+    # d = (d-d.min())/(d.max()-d.min()+1e-5)
+    # flow = (flow-flow.min())/(flow.max()-flow.min())
+    
+    # h = flow*d
+    # d = torch.mean(d**2,dim=-1)
+
+    # d = (dI_x**2+dI_y**2)**0.5
+    # d = (d-d.min())/(d.max()-d.min()+1e-5)
+    # play_tensor_video_opencv(d,fps=1)
+
+    # import matplotlib.pyplot as plt
+    # d_ = cv2.cvtColor(d[6,:].permute(1,2,0).numpy(), cv2.COLOR_BGR2GRAY)
+    # plt.imshow(d_, cmap='gray')
+    # plt.show()
+
+    return d,flow
+
+def gradcam_flow():
+    for idx, batch in enumerate(inference_loader):
+        print(f'{idx/len(inference_loader)*100:.0f} % is done.', end='\r')
+        inputs, targets = batch
+        cls = [class_labels_map[t[0].split('_')[1].lower()] for t in targets]
+        dI_dF, flow = input_flow_grad(inputs[0])
+
+
+        # dI_dF = torch.mean(dI_dF,dim=1)
+        # dI_dF = (dI_dF-dI_dF.min())/(dI_dF.max()-dI_dF.min()+1e-5)
+
+        #calculate saliency map
+        inputs.requires_grad = True
+        pred = model(inputs)
+        pred_cls = torch.argmax(pred,dim=1)
+        model.zero_grad()
+        i=0
+        score = pred[i, pred_cls[i]]
+        score.backward()
+        slc,_ = torch.max(torch.abs(inputs.grad),dim=1)
+        slc = slc[i,1:,:]
+        slc = slc[:,:,:,None].repeat(1,1,1,2)
+
+        dPred_dF = slc * dI_dF
+        flowcam = F.relu(torch.sum(dPred_dF * flow,dim=-1))
+        # flowcam = torch.sum(flowcam**2,dim=-1)
+
+        display_vid = torch.concat([inputs[0].permute(1,0,2,3)[1:],flowcam[:,None,:].repeat(1,3,1,1)],dim=-2)
+        play_tensor_video_opencv(display_vid,fps=2)
+    
 gmodel = GradcamModel(model)
 
 def gradcam():
@@ -195,29 +318,39 @@ def gradcam():
                 play_tensor_video_opencv(final_img, fps=2)
 
 '''
-Acuracy : 0.9516516516516517
+Acuracy : 0.8575338233022137
 '''
 
 def test():
-    root = "C:\\Users\\lahir\\Downloads\\UCF101\\jpgs"
     n_samples = 0
     n_correct = 0
-    for k in inference_class_names.keys():
-        print(f'Inferring class {k} out of {len(list(inference_class_names.keys()))}')
-        class_path = os.path.join(root,inference_class_names[k])
-        dirs = [item.name for item in Path(class_path).iterdir() if item.is_dir()]
+    for idx, batch in enumerate(inference_loader):
+        print(f'{idx/len(inference_loader)*100:.0f} % is done.', end='\r')
+        inputs, targets = batch
+        cls = [class_labels_map[t[0].split('_')[1].lower()] for t in targets]
+        with torch.inference_mode():
+            pred = model(inputs)
+            pred_cls = torch.argmax(pred,dim=1)
+            n_samples += len(pred_cls)
+            n_correct += ((pred_cls == torch.tensor(cls)).sum()).item()
 
-        for d in dirs:
-            l = k
-            g = int(d.split('_')[2][1:])
-            c = int(d.split('_')[3][1:])
-            n=0
-            video = load_jpg_ucf101(l, g, c, n, inference_class_names, transform).transpose(0, 1)
-            with torch.inference_mode():
-                n_samples += 1
-                pred = model(video.unsqueeze(0)).cpu().numpy().argmax()
-                if int(pred) == k:
-                    n_correct += 1
+    # root = "C:\\Users\\lahir\\Downloads\\UCF101\\jpgs"
+    # for k in inference_class_names.keys():
+    #     print(f'Inferring class {k} out of {len(list(inference_class_names.keys()))}')
+    #     class_path = os.path.join(root,inference_class_names[k])
+    #     dirs = [item.name for item in Path(class_path).iterdir() if item.is_dir()]
+
+    #     for d in dirs:
+    #         l = k
+    #         g = int(d.split('_')[2][1:])
+    #         c = int(d.split('_')[3][1:])
+    #         n=0
+    #         video = load_jpg_ucf101(l, g, c, n, inference_class_names, transform).transpose(0, 1)
+    #         with torch.inference_mode():
+    #             n_samples += 1
+    #             pred = model(video.unsqueeze(0)).cpu().numpy().argmax()
+    #             if int(pred) == k:
+    #                 n_correct += 1
     print(f'Acuracy : {n_correct/n_samples}')
 
 def copy_paste_frame(frames_in, src_idx, dst_idx):
@@ -268,7 +401,7 @@ def frame_motion_importance():
     root = "C:\\Users\\lahir\\Downloads\\UCF101\\jpgs"
     for k in inference_class_names.keys():
         print(f'Inferring class {k} out of {len(list(inference_class_names.keys()))}')
-        
+
         class_path = os.path.join(root,inference_class_names[k])
         dirs = [item.name for item in Path(class_path).iterdir() if item.is_dir()]
 
@@ -294,6 +427,6 @@ def frame_motion_importance():
                         writer.writerows([imp])
 
 if __name__ == '__main__':
-    frame_motion_importance()
+    gradcam_flow()
 
 
