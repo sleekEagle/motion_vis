@@ -15,6 +15,11 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 import cv2
+from torchvision import models, transforms
+from torchvision.models import resnet50, ResNet50_Weights
+from torchvision.models.feature_extraction import create_feature_extractor
+from sklearn.cluster import DBSCAN
+from einops import rearrange
 
 def play_tensor_video_opencv(tensor, fps=30, window_name="Tensor Video"):
     # Convert tensor to numpy and ensure correct format
@@ -132,6 +137,12 @@ class GradcamModel(nn.Module):
         super(GradcamModel, self).__init__()
         self.model = model
 
+        #feature extraction model for video clustering
+        weights = ResNet50_Weights.IMAGENET1K_V1
+        resnetmodel = resnet50(weights=weights)
+        self.feature_model = create_feature_extractor(resnetmodel, return_nodes={'avgpool':'f_layer'})
+        self.feature_tr = weights.transforms()
+
         self.model.layer4[2].conv3.register_forward_hook(self.save_activations)
         self.model.layer4[2].conv3.register_backward_hook(self.save_gradients)
 
@@ -139,12 +150,50 @@ class GradcamModel(nn.Module):
         self.activations = output
 
     def save_gradients(self, module, grad_in, grad_out):
-        # grad_out[0][0,1:,:].min(), grad_out[0][0,1:,:].max()s
+        # grad_out[0][0,1:,:].min(), grad_out[0][0,1:,:].max()
         self.gradients = grad_out
 
     def forward(self, x):
         out = self.model(x)
         return out
+    
+    def replace_video(self, input, src_idx):
+        frames = input.clone()
+        return frames[:,src_idx,:,:][:,None,:].repeat(1,input.size(1),1,1)
+    
+    def cluster_frames(self, x):
+        x = x.permute(1,0,2,3)
+        x = self.feature_tr(x)
+        f = self.feature_model(x)['f_layer'].squeeze()
+        f_norm = ((f-f.min())/(f.max()-f.min()+1e-5)).detach().numpy()
+        clustering = DBSCAN(eps=10, min_samples=2)
+        print(clustering.fit_predict(f_norm))
+
+        play_tensor_video_opencv(x,fps=5)
+    
+    def motion_importance(self, x):
+        pred = self.forward(x[None,:])
+        pred = F.softmax(pred,dim=1)
+        pred_cls_orig = torch.argmax(pred,dim=1).item()
+        pred_l_orig = pred[0,pred_cls_orig].item()
+        l_list = []
+        for i in range(x.size(1)):
+            x_rep = self.replace_video(x,i)
+            # play_tensor_video_opencv(x_rep.permute(1,0,2,3),fps=2)
+            pred = self.forward(x_rep[None,:])
+            pred = F.softmax(pred,dim=1)
+            pred_cls = torch.argmax(pred,dim=1).item()
+            pred_l = pred[0,pred_cls].item()
+            l_list.append(pred_l)
+
+        out = {
+            'orig_pred_cls': pred_cls_orig,
+            'orig_l': pred_l_orig,
+            'l_list': l_list
+        }
+        return out
+
+gmodel = GradcamModel(model)
     
 #video shape : 3, t , h , w
 #where t is the number of frames
@@ -301,7 +350,6 @@ def gradcam_flow():
         # play_tensor_video_opencv(display_vid,fps=2)
         # play_tensor_video_opencv(flowcam[:,None,:].repeat(1,3,1,1),fps=2)
     
-gmodel = GradcamModel(model)
 
 def gradcam():
     root = "C:\\Users\\lahir\\Downloads\\UCF101\\jpgs"
@@ -409,22 +457,35 @@ def get_video_frame_motion_importance(video):
     }
     return out
 
-def replace_video(input, src_idx):
-    frames = input.clone()
-    return frames[:,src_idx,:,:][:,None,:].repeat(1,input.size(1),1,1)
 
-def frozen_motion_importance(inputs,idx):
-    n_frames = inputs.size(1)
-    logits_list = []
-    for n in range(0, n_frames):
-        inputs_frozen = replace_video(inputs, n)
-        # play_tensor_video_opencv(inputs_frozen['pixel_values'][0], fps=2)
-        with torch.no_grad():
-            pred = model(inputs_frozen.unsqueeze(0))
-            pred_cls = torch.argmax(pred)
-            pred_l = pred[0,pred_cls]
-            logits_list.append(pred_l.item())
-    return logits_list
+
+def motion_importance():
+    import csv
+    out_path = r'C:\Users\lahir\Downloads\UCF101\motion_importance.csv'
+    for idx, batch in enumerate(inference_loader):
+        print(f'{idx/len(inference_loader)*100:.0f} % is done.', end='\r')
+        inputs, targets = batch
+        cls = class_labels_map[targets[0][0].split('_')[1].lower()]
+        # gmodel.cluster_frames(inputs[0])
+        out = gmodel.motion_importance(inputs[0])
+        out['vid_name'] = targets[0][0]
+        out['gt_cls'] = cls
+
+        with open(out_path, 'a', newline='', encoding='utf-8') as file:
+            writer = csv.DictWriter(file, fieldnames=out.keys())
+            if os.path.getsize(out_path) == 0:
+                writer.writeheader()
+            writer.writerows([out])
+
+def show_videos():
+    #examined 140 videos
+    for idx, batch in enumerate(inference_loader):
+        print(f'{idx} of {len(inference_loader)}')
+        inputs, targets = batch
+        video = rearrange(inputs, 'b c t h w -> (b t) c h w')
+        play_tensor_video_opencv(video)
+        pass
+
 
 def frame_motion_importance():
     import csv
@@ -459,6 +520,6 @@ def frame_motion_importance():
                         writer.writerows([imp])
 
 if __name__ == '__main__':
-    gradcam_flow()
+    motion_importance()
 
 
