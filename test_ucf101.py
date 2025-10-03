@@ -138,10 +138,10 @@ class GradcamModel(nn.Module):
         self.model = model
 
         #feature extraction model for video clustering
-        weights = ResNet50_Weights.IMAGENET1K_V1
-        resnetmodel = resnet50(weights=weights)
-        self.feature_model = create_feature_extractor(resnetmodel, return_nodes={'avgpool':'f_layer'})
-        self.feature_tr = weights.transforms()
+        # weights = ResNet50_Weights.IMAGENET1K_V1
+        # resnetmodel = resnet50(weights=weights)
+        # self.feature_model = create_feature_extractor(resnetmodel, return_nodes={'avgpool':'f_layer'})
+        # self.feature_tr = weights.transforms()
 
         self.model.layer4[2].conv3.register_forward_hook(self.save_activations)
         self.model.layer4[2].conv3.register_backward_hook(self.save_gradients)
@@ -161,6 +161,11 @@ class GradcamModel(nn.Module):
         frames = input.clone()
         return frames[:,src_idx,:,:][:,None,:].repeat(1,input.size(1),1,1)
     
+    def copy_paste_frame(self, frames_in, src_idx, dst_idx):
+        frames = frames_in.clone()
+        frames[:,dst_idx,:] = frames[:,src_idx,:]
+        return frames
+        
     def cluster_frames(self, x):
         x = x.permute(1,0,2,3)
         x = self.feature_tr(x)
@@ -192,6 +197,30 @@ class GradcamModel(nn.Module):
             'l_list': l_list
         }
         return out
+    
+    def frame_motion_importance(self, x):
+        pred = self.forward(x[None,:])
+        pred = F.softmax(pred,dim=1)
+        pred_cls_orig = torch.argmax(pred,dim=1).item()
+        pred_l_orig = pred[0,pred_cls_orig].item()
+
+        l_list = []
+        for i in range(x.size(1)-1):
+            x_cp = self.copy_paste_frame(x, i, i+1)
+            pred = self.forward(x_cp[None,:])
+            pred = F.softmax(pred,dim=1)
+            pred_cls = torch.argmax(pred,dim=1).item()
+            pred_l = pred[0,pred_cls].item()
+            l_list.append(pred_l)
+        
+        out = {
+            'orig_pred_cls': pred_cls_orig,
+            'orig_l': pred_l_orig,
+            'l_list': l_list
+        }
+        return out
+
+
 
 gmodel = GradcamModel(model)
     
@@ -433,10 +462,7 @@ def test():
     #                 n_correct += 1
     print(f'Acuracy : {n_correct/n_samples}')
 
-def copy_paste_frame(frames_in, src_idx, dst_idx):
-    frames = frames_in.clone()
-    frames[:,dst_idx,:] = frames[:,src_idx,:]
-    return frames
+
 
 def get_video_frame_motion_importance(video):
     pred = model(video.unsqueeze(0))
@@ -477,6 +503,20 @@ def motion_importance():
                 writer.writeheader()
             writer.writerows([out])
 
+def process_motion_importance():
+    import pandas as pd
+    df_path = r'C:\Users\lahir\Downloads\UCF101\motion_importance.csv'
+    df_out_path = r'C:\Users\lahir\Downloads\UCF101\motion_importance_processed.csv'
+
+    df = pd.read_csv(df_path)
+    def getmax(x):
+        x = x.replace('[','').replace(']','').split(',')
+        x = np.array([float(x_) for x_ in x]).max()
+        return x
+    df['l_max'] = df['l_list'].apply(lambda x: getmax(x))
+    df['reduction_ratio'] = (df['orig_l'] - df['l_max'])/df['orig_l']
+    df.to_csv(df_out_path)
+
 def show_videos():
     #examined 140 videos
     for idx, batch in enumerate(inference_loader):
@@ -489,37 +529,31 @@ def show_videos():
 
 def frame_motion_importance():
     import csv
+    import pandas as pd
 
-    out_path = r'C:\Users\lahir\Downloads\UCF101\tmp_imp.csv'
-    root = "C:\\Users\\lahir\\Downloads\\UCF101\\jpgs"
-    for k in inference_class_names.keys():
-        print(f'Inferring class {k} out of {len(list(inference_class_names.keys()))}')
+    THR = 0.4
 
-        class_path = os.path.join(root,inference_class_names[k])
-        dirs = [item.name for item in Path(class_path).iterdir() if item.is_dir()]
+    out_path = r'C:\Users\lahir\Downloads\UCF101\frame_motion_importance.csv'
+    df_path_motion_imp = r'C:\Users\lahir\Downloads\UCF101\motion_importance_processed.csv'
+    df = pd.read_csv(df_path_motion_imp)
 
-        for d in dirs:
-            l = k
-            g = int(d.split('_')[2][1:])
-            c = int(d.split('_')[3][1:])
-            n=0
-            video = load_jpg_ucf101(l, g, c, n, inference_class_names, transform).transpose(0, 1)
-            with torch.inference_mode():
-                pred = model(video.unsqueeze(0)).cpu().numpy().argmax()
-                if int(pred) == k:
-                    imp = get_video_frame_motion_importance(video)
-                    frozen_logits = frozen_motion_importance(video,0)
-                    p = os.path.join(root,d)
-                    imp['path'] = p
-                    imp['frozen_logits'] = frozen_logits
-                    imp['orig_class'] = k
-                    with open(out_path, 'a', newline='', encoding='utf-8') as file:
-                        writer = csv.DictWriter(file, fieldnames=imp.keys())
-                        if os.path.getsize(out_path) == 0:
-                            writer.writeheader()
-                        writer.writerows([imp])
+    for idx, batch in enumerate(inference_loader):
+        print(f'{idx/len(inference_loader)*100:.0f} % is done.', end='\r')
+        inputs, targets = batch
+        target = targets[0][0]
+        cls = class_labels_map[targets[0][0].split('_')[1].lower()]
+        #check if motion is important
+        if float(df[df['vid_name']==target]['reduction_ratio'].values[0]) < THR:
+            continue
+
+        out = gmodel.frame_motion_importance(inputs[0])
+        with open(out_path, 'a', newline='', encoding='utf-8') as file:
+            writer = csv.DictWriter(file, fieldnames=out.keys())
+            if os.path.getsize(out_path) == 0:
+                writer.writeheader()
+            writer.writerows([out])
 
 if __name__ == '__main__':
-    motion_importance()
+    frame_motion_importance()
 
 
