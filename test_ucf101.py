@@ -265,8 +265,10 @@ def gradcam_flow():
             slc = slc[:,:,:,None].repeat(1,1,1,2)
             dPred_dF = slc * dI_dF
             # dPred_dF = torch.mean(dPred_dF,dim=(1,2),keepdim=True)
-            flowcam = dPred_dF * flow
+            flowcam = dPred_dF
+            # flowcam = dPred_dF * flow
             flowcam =  F.relu(torch.sum(flowcam,dim=3))
+            # flowcam = 1-flowcam
             flowcam = (flowcam-flowcam.min())/(flowcam.max()-flowcam.min())
 
             video = inputs[0][:,1:,:]
@@ -280,7 +282,7 @@ def gradcam_flow():
             # play_tensor_video_opencv(final_img,fps=2)
 
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            video_writer = cv2.VideoWriter(os.path.join('C:\\Users\\lahir\\Downloads\\UCF101\\gradflow\\',f'{idx}.mp4'), fourcc, 2, (112, 112))
+            video_writer = cv2.VideoWriter(os.path.join('C:\\Users\\lahir\\Downloads\\UCF101\\gradflow_salient\\',f'{idx}.mp4'), fourcc, 2, (112, 112))
             
             # Write each frame
             for i in range(final_img.size(0)):
