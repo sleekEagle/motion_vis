@@ -20,6 +20,9 @@ from torchvision.models import resnet50, ResNet50_Weights
 from torchvision.models.feature_extraction import create_feature_extractor
 from sklearn.cluster import DBSCAN
 from einops import rearrange
+import csv
+import pandas as pd
+import func
 
 def play_tensor_video_opencv(tensor, fps=30, window_name="Tensor Video"):
     # Convert tensor to numpy and ensure correct format
@@ -219,103 +222,38 @@ class GradcamModel(nn.Module):
             'l_list': l_list
         }
         return out
+    
+    def calc_gradcam(self, x):
+        act = self.activations
+        grad = self.gradients[0]
+        grad = grad.mean(dim=(2,3,4),keepdim=True)
+        cam = act * grad
+        cam = F.relu(cam.sum(dim=1,keepdim=True))
+        cam_int = F.interpolate(cam,
+                            size=(16,112,112),           # Target size
+                            mode='trilinear',         # 'nearest' | 'bilinear' | 'bicubic'
+                            align_corners=False      # Set True for some modes
+                        ).squeeze(dim=1)
+        cam_int = (cam_int - cam_int.min())/(cam_int.max() - cam_int.min() + 1e-5)
+        return cam_int
+    
+    def calc_flow_saliency(self, x, i=0):
+        slc,_ = torch.max(torch.abs(x.grad),dim=1)
+        slc = slc[i,1:,:]
+        slc = slc[:,:,:,None].repeat(1,1,1,2)
 
-
+        x = x.detach()
+        x = x[i,:]
+        dI_dF, _ = func.input_flow_grad(x)
+        dPred_dF = slc * dI_dF
+        dPred_dF =  F.relu(torch.sum(dPred_dF,dim=3))
+        dPred_dF = (dPred_dF-dPred_dF.min())/(dPred_dF.max()-dPred_dF.min())
+        return dPred_dF
 
 gmodel = GradcamModel(model)
     
-#video shape : 3, t , h , w
-#where t is the number of frames
-def calc_flow(video):
-    flow = torch.empty(0)
-    for i in range(0, video.size(1)-1):
-        f0_ = video[:,i+1,:,:].cpu().numpy().transpose(1, 2, 0)
-        f0_ = cv2.cvtColor(f0_, cv2.COLOR_BGR2GRAY)
-        f0_= cv2.normalize(f0_, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-        if f0_.shape[0]!=112:
-            f0_ = cv2.resize(f0_, (112, 112), interpolation=cv2.INTER_LINEAR)
-        f1_ = video[:,i,:,:].cpu().numpy().transpose(1, 2, 0)
-        f1_ = cv2.cvtColor(f1_, cv2.COLOR_BGR2GRAY)
-        f1_= cv2.normalize(f1_, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-        if f1_.shape[0]!=112:
-            f1_ = cv2.resize(f1_, (112, 112), interpolation=cv2.INTER_LINEAR)
-        flow_ = cv2.calcOpticalFlowFarneback(
-        f0_, f1_, None,
-        pyr_scale=0.5, levels=3, winsize=15, iterations=3,
-        poly_n=5, poly_sigma=1.2, flags=0
-        )
-        flow = torch.cat((flow,torch.tensor(flow_).unsqueeze(0)),dim=0)
-    return flow
 
-def warp_video(video, flow):
-    B, C, H, W = video.shape
-    flow = flow.permute(0,3,1,2)
-    grid_y, grid_x = torch.meshgrid(
-        torch.arange(0, H, device=video.device),
-        torch.arange(0, W, device=video.device),
-        indexing='ij'
-    )
-    # Normalize coordinates to [-1, 1]
-    grid_x = 2.0 * grid_x / (W - 1) - 1.0
-    grid_y = 2.0 * grid_y / (H - 1) - 1.0
-    # Expand to batch size
-    grid = torch.stack((grid_x, grid_y), dim=-1).unsqueeze(0).repeat(B, 1, 1, 1)
 
-    flow_normalized = torch.stack([
-        2.0 * flow[:, 0] / (W - 1),  # dx normalized
-        2.0 * flow[:, 1] / (H - 1)   # dy normalized
-    ], dim=-1).permute(0, 3, 1, 2)
-
-    new_grid = grid + flow_normalized.permute(0, 2, 3, 1)
-    warped = F.grid_sample(
-        video, 
-        new_grid, 
-        mode='bilinear', 
-        padding_mode='zeros',  # or 'border', 'reflection'
-        align_corners=True
-    )
-
-    return warped
-
-def input_flow_grad(video):
-    delta = 0.01 # ratio of the original flow to change
-    flow = calc_flow(video)
-    # warped = warp_video(video[:,1:,:].permute(1,0,2,3),flow)
-    # play_tensor_video_opencv(warped,fps=2)
-    # play_tensor_video_opencv(video[:,1:,:].permute(1,0,2,3),fps=2)
-    f_delta = torch.ones_like(flow) * delta
-
-    delta_x = f_delta.clone()
-    delta_x[:,:,:,1] = 0
-    delta_y = f_delta.clone()
-    delta_y[:,:,:,0] = 0
-
-    v = video[:,:-1,:].permute(1,0,2,3)
-    warped_x = warp_video(v, flow+delta_x)
-    warped_y = warp_video(v, flow+delta_y)
-
-    v1 = video[:,1:,:].permute(1,0,2,3)
-    dI_x = (warped_x - v1) / delta_x[:,:,:,0][:,None,:,:]
-    dI_y = (warped_y - v1) / delta_y[:,:,:,1][:,None,:,:]
-
-    d = torch.concat([dI_x[:,:,:,:,None],dI_y[:,:,:,:,None]],dim=-1)
-    d = torch.max(d,dim=1)[0]
-    # d = (d-d.min())/(d.max()-d.min()+1e-5)
-    # flow = (flow-flow.min())/(flow.max()-flow.min())
-    
-    # h = flow*d
-    # d = torch.mean(d**2,dim=-1)
-
-    # d = (dI_x**2+dI_y**2)**0.5
-    # d = (d-d.min())/(d.max()-d.min()+1e-5)
-    # play_tensor_video_opencv(d,fps=1)
-
-    # import matplotlib.pyplot as plt
-    # d_ = cv2.cvtColor(d[6,:].permute(1,2,0).numpy(), cv2.COLOR_BGR2GRAY)
-    # plt.imshow(d_, cmap='gray')
-    # plt.show()
-
-    return d,flow
 
 def gradcam_flow():
     for idx, batch in enumerate(inference_loader):
@@ -528,9 +466,6 @@ def show_videos():
 
 
 def frame_motion_importance():
-    import csv
-    import pandas as pd
-
     THR = 0.4
 
     out_path = r'C:\Users\lahir\Downloads\UCF101\frame_motion_importance.csv'
@@ -547,13 +482,72 @@ def frame_motion_importance():
             continue
 
         out = gmodel.frame_motion_importance(inputs[0])
+        out['vid_name'] = target
         with open(out_path, 'a', newline='', encoding='utf-8') as file:
             writer = csv.DictWriter(file, fieldnames=out.keys())
             if os.path.getsize(out_path) == 0:
                 writer.writeheader()
             writer.writerows([out])
 
-if __name__ == '__main__':
-    frame_motion_importance()
+def motion_saliency():
+    THR = 0.004
+    frmo_imp = r'C:\Users\lahir\Downloads\UCF101\frame_motion_importance.csv'
+    df = pd.read_csv(frmo_imp)
 
+    for idx, batch in enumerate(inference_loader):
+        print(f'{idx/len(inference_loader)*100:.0f} % is done.', end='\r')
+        inputs, targets = batch
+        target = targets[0][0]
+        cls = class_labels_map[targets[0][0].split('_')[1].lower()]
+        if not target in df['vid_name'].values:
+            continue
+        pass
+        row = df[df['vid_name']==target].iloc[0]
+        l_orig = row['orig_l']
+        l_list = row['l_list']
+        l_list = np.array([float(val) for val in l_list.replace('[','').replace(']','').split(',')])
+        l_red = np.maximum((l_orig - l_list)/l_orig,0)
+        valid_idx = np.argwhere(l_red > THR)
+        from matplotlib import pyplot as plt
+        # plt.plot(l_red)
+        # plt.show()
+
+        #calculate gracam
+        gmodel.zero_grad()
+        inputs.requires_grad = True
+        pred = gmodel(inputs[0][None,:])
+        l_pred = torch.argmax(pred,dim=1)
+        pred[0,l_pred].backward()
+        gcam = gmodel.calc_gradcam(inputs[0])
+        dPred_dF = gmodel.calc_flow_saliency(inputs,0)
+
+        dPred_dF_cam = gcam[0,1:,:] * dPred_dF
+
+
+        video = inputs[0][:,1:,:]
+        video = video.permute(1,2,3,0).detach().numpy()
+        video = np.uint8((video - video.min())/(video.max() - video.min() + 1e-5)*255)
+
+        transformed = np.uint8(dPred_dF_cam[None,:].detach().numpy()*255)
+        h_col = np.concatenate([cv2.applyColorMap(img, cv2.COLORMAP_JET)[None,:] for img in list(transformed[0])],axis=0)
+        final_img = cv2.addWeighted(video, 0.6, h_col, 0.4, 0)
+        final_img = torch.tensor(final_img).permute(0,3,1,2)
+
+
+        plt.imshow(dPred_dF_cam[9,:].detach().numpy())
+        plt.show()
+
+        play_tensor_video_opencv(final_img,fps=1)
+
+
+
+
+
+        pass
+
+
+
+
+if __name__ == '__main__':
+    motion_saliency()
 
