@@ -546,7 +546,30 @@ def motion_saliency():
             dPred_dF_ = np.uint8(dPred_dF_.detach().numpy()*255)
             cv2.imwrite(os.path.join(vid_dir,f'motion_sal_{idx}.png'), dPred_dF_)
 
+def gradcam_sal():
+    img_path = r'C:\Users\lahir\Downloads\UCF101\flow_saliency_imgs'
+    dirs = [d for d in os.listdir(img_path) if os.path.isdir(os.path.join(img_path, d))]
+    for d in dirs:
+        print(f'Processing {d} out of {len(dirs)} dirs.', end='\r')
+        p = os.path.join(img_path, d)
+        img_files = [f for f in os.listdir(p) if (os.path.isfile(os.path.join(p,f)) and f.startswith('img'))]
+        nums = [int(f.split('_')[1].split('.')[0]) for f in img_files]
+        out_dir = os.path.join(p, 'gcam_sal')
+        os.makedirs(out_dir, exist_ok=True)
+        for n in nums:
+            img = cv2.imread(os.path.join(p,f'img_{n}.png'))
+            gcam = cv2.imread(os.path.join(p,f'gradcam_{n}.png'))
+            gcam = (gcam-gcam.min())/(gcam.max()-gcam.min()+1e-5)
+            msal = cv2.imread(os.path.join(p,f'motion_sal_{n}.png'))
+            msal = (msal-msal.min())/(msal.max()-msal.min()+1e-5)
+
+            msal_gcam = gcam * msal
+            msal_gcam = np.uint8((msal_gcam-msal_gcam.min())/(msal_gcam.max()-msal_gcam.min())*255)
+            h_col = cv2.applyColorMap(msal_gcam, cv2.COLORMAP_JET)
+            final_img = cv2.addWeighted(img, 0.6, h_col, 0.4, 0)
+
+            cv2.imwrite(os.path.join(out_dir,f'{n}.png'), final_img)
 
 if __name__ == '__main__':
-    motion_saliency()
+    gradcam_sal()
 
