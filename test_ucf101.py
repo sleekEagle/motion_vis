@@ -238,7 +238,7 @@ class GradcamModel(nn.Module):
         return cam_int
     
     def calc_flow_saliency(self, x, i=0):
-        slc,_ = torch.max(torch.abs(x.grad),dim=1)
+        slc,_ = torch.max(x.grad ,dim=1)
         slc = slc[i,1:,:]
         slc = slc[:,:,:,None].repeat(1,1,1,2)
 
@@ -246,14 +246,20 @@ class GradcamModel(nn.Module):
         x = x[i,:]
         dI_dF, _ = func.input_flow_grad(x)
         dPred_dF = slc * dI_dF
+        dPred_dF[:,:5,:] = 0
+        dPred_dF[:,-5:,:] = 0
+        dPred_dF[:,:,:5] = 0
+        dPred_dF[:,:,-5:] = 0
+
+        # from matplotlib import pyplot as plt
+        # plt.imshow(dPred_dF[0,:,:,0].cpu().numpy())
+        # plt.show()
+
         dPred_dF =  F.relu(torch.sum(dPred_dF,dim=3))
         dPred_dF = (dPred_dF-dPred_dF.min())/(dPred_dF.max()-dPred_dF.min())
         return dPred_dF
 
 gmodel = GradcamModel(model)
-    
-
-
 
 def gradcam_flow():
     for idx, batch in enumerate(inference_loader):
@@ -491,7 +497,7 @@ def frame_motion_importance():
 
 def motion_saliency():
     THR = 0.004
-    out_path = r'C:\Users\lahir\Downloads\UCF101\flow_saliency_imgs'
+    out_path = r'C:\Users\lahir\Downloads\UCF101\flow_saliency_imgs1'
     frmo_imp = r'C:\Users\lahir\Downloads\UCF101\frame_motion_importance.csv'
     df = pd.read_csv(frmo_imp)
 
@@ -571,5 +577,5 @@ def gradcam_sal():
             cv2.imwrite(os.path.join(out_dir,f'{n}.png'), final_img)
 
 if __name__ == '__main__':
-    gradcam_sal()
+    motion_saliency()
 
