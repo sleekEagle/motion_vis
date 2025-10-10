@@ -491,6 +491,7 @@ def frame_motion_importance():
 
 def motion_saliency():
     THR = 0.004
+    out_path = r'C:\Users\lahir\Downloads\UCF101\flow_saliency_imgs'
     frmo_imp = r'C:\Users\lahir\Downloads\UCF101\frame_motion_importance.csv'
     df = pd.read_csv(frmo_imp)
 
@@ -502,12 +503,16 @@ def motion_saliency():
         if not target in df['vid_name'].values:
             continue
         pass
+        
+        #get the important frames in terms of motion
         row = df[df['vid_name']==target].iloc[0]
         l_orig = row['orig_l']
         l_list = row['l_list']
         l_list = np.array([float(val) for val in l_list.replace('[','').replace(']','').split(',')])
         l_red = np.maximum((l_orig - l_list)/l_orig,0)
-        valid_idx = np.argwhere(l_red > THR)
+        valid_idx = np.argwhere(l_red > THR)[:,0]
+        if len(valid_idx) == 0:
+            continue
         from matplotlib import pyplot as plt
         # plt.plot(l_red)
         # plt.show()
@@ -516,36 +521,30 @@ def motion_saliency():
         gmodel.zero_grad()
         inputs.requires_grad = True
         pred = gmodel(inputs[0][None,:])
-        l_pred = torch.argmax(pred,dim=1)
-        pred[0,l_pred].backward()
+        pred_idx = torch.argmax(pred,dim=1)
+        pred[0,pred_idx].backward()
         gcam = gmodel.calc_gradcam(inputs[0])
         dPred_dF = gmodel.calc_flow_saliency(inputs,0)
 
         dPred_dF_cam = gcam[0,1:,:] * dPred_dF
 
+        #save images
+        vid_dir = os.path.join(out_path, target)
+        os.makedirs(vid_dir,exist_ok=True)
+        for idx in valid_idx:
+            img = inputs[0][:,idx,:].squeeze().permute(1,2,0).detach().numpy()
+            img = np.uint8((img - img.min())/(img.max() - img.min() + 1e-5)*255)
+            cv2.imwrite(os.path.join(vid_dir,f'img_{idx}.png'), img)
 
-        video = inputs[0][:,1:,:]
-        video = video.permute(1,2,3,0).detach().numpy()
-        video = np.uint8((video - video.min())/(video.max() - video.min() + 1e-5)*255)
+            gcam_ = gcam[0,idx,:].unsqueeze(-1).repeat(1,1,3)
+            gcam_ = (gcam_ - gcam_.min())/(gcam_.max() - gcam_.min() + 1e-5)
+            gcam_ = np.uint8(gcam_.detach().numpy()*255)
+            cv2.imwrite(os.path.join(vid_dir,f'gradcam_{idx}.png'), gcam_)
 
-        transformed = np.uint8(dPred_dF_cam[None,:].detach().numpy()*255)
-        h_col = np.concatenate([cv2.applyColorMap(img, cv2.COLORMAP_JET)[None,:] for img in list(transformed[0])],axis=0)
-        final_img = cv2.addWeighted(video, 0.6, h_col, 0.4, 0)
-        final_img = torch.tensor(final_img).permute(0,3,1,2)
-
-
-        plt.imshow(dPred_dF_cam[9,:].detach().numpy())
-        plt.show()
-
-        play_tensor_video_opencv(final_img,fps=1)
-
-
-
-
-
-        pass
-
-
+            dPred_dF_ = dPred_dF[idx,:].unsqueeze(-1).repeat(1,1,3)
+            dPred_dF_ = (dPred_dF_ - dPred_dF_.min())/(dPred_dF_.max() - dPred_dF_.min() + 1e-5)
+            dPred_dF_ = np.uint8(dPred_dF_.detach().numpy()*255)
+            cv2.imwrite(os.path.join(vid_dir,f'motion_sal_{idx}.png'), dPred_dF_)
 
 
 if __name__ == '__main__':
