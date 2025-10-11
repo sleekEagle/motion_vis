@@ -56,7 +56,7 @@ def warp_video(video, flow):
     return warped
 
 def input_flow_grad(video):
-    delta = 0.01 # ratio of the original flow to change
+    delta = 1.0
     flow = calc_flow(video)
 
     f_delta = torch.ones_like(flow) * delta
