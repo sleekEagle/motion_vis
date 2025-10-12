@@ -24,35 +24,6 @@ import csv
 import pandas as pd
 import func
 
-def play_tensor_video_opencv(tensor, fps=30, window_name="Tensor Video"):
-    # Convert tensor to numpy and ensure correct format
-    if isinstance(tensor, torch.Tensor):
-        frames = tensor.detach().cpu().numpy()
-    else:
-        frames = tensor
-    
-    # Ensure shape: [T, C, H, W] -> [T, H, W, C] for OpenCV
-    if frames.shape[1] == 3:  # [T, C, H, W]
-        frames = frames.transpose(0, 2, 3, 1)  # [T, H, W, C]
-    
-    # Convert RGB to BGR for OpenCV
-    frames = frames[..., ::-1]  # RGB -> BGR
-    
-    # Normalize to 0-255 if needed
-    frames =  (frames - frames.min())/(frames.max() - frames.min() + 1e-5)
-    frames = frames * 255.0
-    frames = frames.astype(np.uint8)
-    
-    # Play video
-    for frame in frames:
-        cv2.imshow(window_name, frame)
-        
-        # Wait for key press or delay
-        if cv2.waitKey(int(1000/fps)) & 0xFF == ord('q'):  # Press 'q' to quit
-            break
-    
-    cv2.destroyAllWindows()
-
 
 def numericalSort(value):
     numbers = re.compile(r'(\d+)')
@@ -163,7 +134,7 @@ class GradcamModel(nn.Module):
         # add noise to input
         #noise parameters from https://github.com/pkmr06/pytorch-smoothgrad
         self.noise_tr = transforms.Compose([
-            AddGaussianNoise(mean=0., std=0.05)
+            AddGaussianNoise(mean=0., std=0.01)
         ])
 
     def save_activations(self, module, input, output):
@@ -261,6 +232,15 @@ class GradcamModel(nn.Module):
 
         x = x.detach()
         dI_dF, _ = func.input_flow_grad(x)
+
+        # d = torch.sum(dI_dF**2,dim=-1)
+        # from matplotlib import pyplot as plt
+        # plt.imshow(d[4,:].cpu().numpy())
+        # plt.show()
+
+        # plt.imshow(slc[4,:,:,0].cpu().numpy())
+        # plt.show()
+
         dPred_dF = slc * dI_dF
         dPred_dF[:,:5,:] = 0
         dPred_dF[:,-5:,:] = 0
@@ -269,6 +249,9 @@ class GradcamModel(nn.Module):
 
         dPred_dF = torch.sum(dPred_dF, dim=3)
         dPred_dF =  F.relu(dPred_dF)
+
+        # plt.imshow(dPred_dF[6,:].cpu().numpy())
+        # plt.show()
 
         # dPred_dF = (dPred_dF-dPred_dF.min())/(dPred_dF.max()-dPred_dF.min())
         # from matplotlib import pyplot as plt
@@ -552,6 +535,7 @@ def motion_saliency():
         dPred_dF = gmodel.calc_flow_saliency_smooth(inputs,0)
 
         dPred_dF_cam = gcam[0,1:,:] * dPred_dF
+        
 
         #save images
         vid_dir = os.path.join(out_path, target)
@@ -573,23 +557,40 @@ def motion_saliency():
 
 
 def motion_saliency_smooth():
-    THR = 0.004
+    THR = 1e-10
+    STD_THR = 0.001
     N_smooth = 10
-    out_path = r'C:\Users\lahir\Downloads\UCF101\flow_saliency_imgs_smooth_0.05_f_1'
+    out_path = r'C:\Users\lahir\Downloads\UCF101\flow_saliency_imgs'
     frmo_imp = r'C:\Users\lahir\Downloads\UCF101\frame_motion_importance.csv'
     df = pd.read_csv(frmo_imp)
+    count=0
 
     for idx, batch in enumerate(inference_loader):
-        print(f'{idx/len(inference_loader)*100:.0f} % is done.', end='\r')
         inputs, targets = batch
         target = targets[0][0]
+        print(f'{target} {idx/len(inference_loader)*100:.0f} % is done.', end='\r')
         cls = class_labels_map[targets[0][0].split('_')[1].lower()]
+
         if not target in df['vid_name'].values:
             continue
-        pass
+
+        #get the important frames in terms of motion
+        row = df[df['vid_name']==target].iloc[0]
+        l_orig = row['orig_l']
+        l_list = row['l_list']
+        l_list = np.array([float(val) for val in l_list.replace('[','').replace(']','').split(',')])
+        l_red = np.maximum((l_orig - l_list)/l_orig,0)
+        valid_idx = np.argwhere(l_red > THR)[:,0]
+        if len(valid_idx) == 0:
+            continue
+        
+        if count==10:
+            break
+        count+=1
 
         input = inputs[0]
-        dPred_dF = torch.zeros((input.size(1)-1,input.size(2),input.size(3)))
+        # dPred_dF = torch.zeros((input.size(1)-1,input.size(2),input.size(3)))
+        dPred_dF = torch.empty(0)
         for n in range(N_smooth):
             input_tr = gmodel.noise_tr(input)
             # play_tensor_video_opencv(input.permute(1,0,2,3), fps=2)
@@ -600,25 +601,29 @@ def motion_saliency_smooth():
             pred_idx = torch.argmax(pred,dim=1)
             pred[0,pred_idx].backward()
             dPred_dF_ = gmodel.calc_flow_saliency(input_tr)
-            dPred_dF += dPred_dF_
-        dPred_dF = dPred_dF / N_smooth
+            dPred_dF = torch.concat([dPred_dF, dPred_dF_[None,:]], dim=0)
+            # dPred_dF += dPred_dF_
+        dPred_dF_std = dPred_dF.std(dim=0)
+        dPred_dF_m = dPred_dF.mean(dim=0)
+        mask = (dPred_dF_std<STD_THR).type(torch.int8)
+        dPred_dF_m = dPred_dF_m * mask
         # play_tensor_video_opencv(dPred_dF[:,None,:].repeat(1,3,1,1), fps=2)
 
         #save images
         vid_dir = os.path.join(out_path, target)
         os.makedirs(vid_dir,exist_ok=True)
-        for idx in range(input.size(1)-1):
+        for idx in valid_idx:
             img = input[:,idx,:].squeeze().permute(1,2,0).detach().numpy()
             img = np.uint8((img - img.min())/(img.max() - img.min() + 1e-5)*255)
             cv2.imwrite(os.path.join(vid_dir,f'img_{idx}.png'), img)
 
-            dPred_dF_ = dPred_dF[idx,:].unsqueeze(-1).repeat(1,1,3)
+            dPred_dF_ = dPred_dF_m[idx,:].unsqueeze(-1).repeat(1,1,3)
             dPred_dF_ = (dPred_dF_ - dPred_dF_.min())/(dPred_dF_.max() - dPred_dF_.min() + 1e-5)
             dPred_dF_ = np.uint8(dPred_dF_.detach().numpy()*255)
             cv2.imwrite(os.path.join(vid_dir,f'motion_sal_{idx}.png'), dPred_dF_)
 
 def gradcam_sal():
-    img_path = r'C:\Users\lahir\Downloads\UCF101\flow_saliency_imgs_smooth_0.05_f_1'
+    img_path = r'C:\Users\lahir\Downloads\UCF101\flow_saliency_imgs'
     dirs = [d for d in os.listdir(img_path) if os.path.isdir(os.path.join(img_path, d))]
     for d in dirs:
         print(f'Processing {d} out of {len(dirs)} dirs.', end='\r')
@@ -642,6 +647,9 @@ def gradcam_sal():
 
             cv2.imwrite(os.path.join(out_dir,f'{n}.png'), final_img)
 
+    
+
 if __name__ == '__main__':
+    motion_saliency_smooth()
     gradcam_sal()
 

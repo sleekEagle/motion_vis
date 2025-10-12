@@ -1,9 +1,40 @@
 import torch
 import cv2
 import torch.nn.functional as F
+import numpy as np
+
+def play_tensor_video_opencv(tensor, fps=30, window_name="Tensor Video"):
+    # Convert tensor to numpy and ensure correct format
+    if isinstance(tensor, torch.Tensor):
+        frames = tensor.detach().cpu().numpy()
+    else:
+        frames = tensor
+    
+    # Ensure shape: [T, C, H, W] -> [T, H, W, C] for OpenCV
+    if frames.shape[1] == 3:  # [T, C, H, W]
+        frames = frames.transpose(0, 2, 3, 1)  # [T, H, W, C]
+    
+    # Convert RGB to BGR for OpenCV
+    frames = frames[..., ::-1]  # RGB -> BGR
+    
+    # Normalize to 0-255 if needed
+    frames =  (frames - frames.min())/(frames.max() - frames.min() + 1e-5)
+    frames = frames * 255.0
+    frames = frames.astype(np.uint8)
+    
+    # Play video
+    for frame in frames:
+        cv2.imshow(window_name, frame)
+        
+        # Wait for key press or delay
+        if cv2.waitKey(int(1000/fps)) & 0xFF == ord('q'):  # Press 'q' to quit
+            break
+    
+    cv2.destroyAllWindows()
 
 #video shape : 3, t , h , w
 #where t is the number of frames
+from matplotlib import pyplot as plt
 def calc_flow(video):
     flow = torch.empty(0)
     for i in range(0, video.size(1)-1):
@@ -23,6 +54,21 @@ def calc_flow(video):
         poly_n=5, poly_sigma=1.2, flags=0
         )
         flow = torch.cat((flow,torch.tensor(flow_).unsqueeze(0)),dim=0)
+
+        # plt.imshow(f0_, cmap='gray')
+        # plt.show()
+        # plt.imshow(f1_, cmap='gray')
+        # plt.show()
+
+        # v = torch.tensor(np.concat([f0_[None,:],f1_[None,:]],axis=0))
+        # play_tensor_video_opencv(v[:,None,:].repeat(1,3,1,1), fps=1)
+
+        # f = (flow_**2).sum(axis=-1)**0.5
+        # plt.imshow(f, cmap='gray')
+        # plt.show()
+
+
+        pass
     return flow
 
 def warp_video(video, flow):
@@ -59,6 +105,14 @@ def input_flow_grad(video):
     delta = 1.0
     flow = calc_flow(video)
 
+    # flow_mag = torch.sum(flow**2,dim=-1)
+    # flow_mag = flow[:,:,:,0]
+    # from matplotlib import pyplot as plt
+    # plt.imshow(flow_mag[0,:].cpu().numpy())
+    # plt.show()
+    # play_tensor_video_opencv(flow_mag[:,None,:].repeat(1,3,1,1), fps=2)
+    # play_tensor_video_opencv(video.permute(1,0,2,3), fps=2)
+
     f_delta = torch.ones_like(flow) * delta
 
     delta_x = f_delta.clone()
@@ -78,3 +132,17 @@ def input_flow_grad(video):
     d = torch.max(d,dim=1)[0]
 
     return d,flow
+
+def input_flow_grad_mag(video):
+    flow = calc_flow(video)
+    v = video[:,:-1,:].permute(1,0,2,3)
+    warped_v = warp_video(v, flow+torch.ones_like(flow))
+    v1 = video[:,1:,:].permute(1,0,2,3)
+    dI_dF = (warped_v - v1) 
+    dI_dF = torch.max(dI_dF,dim=1)[0]
+
+    # from matplotlib import pyplot as plt
+    # plt.imshow(dI_dF[5,:].cpu().numpy())
+    # plt.show()
+
+    return dI_dF, flow
