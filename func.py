@@ -183,9 +183,12 @@ class RAFT_OF:
         return flows
     
     def predict_flow_video(self, video):
-        img1_batch = video[0:-1,:]
-        img2_batch = video[1:,:]
-        flows = self.predict_flow_batch(img1_batch,img2_batch)
+        flows = torch.empty(0).to(self.device)
+        for i in range(video.size(0)-1):
+            img1_batch = video[i,:][None,:]
+            img2_batch = video[i+1,:][None,:]
+            f = self.predict_flow_batch(img1_batch,img2_batch)[-1]
+            flows = torch.cat((flows,f),dim=0)
         return flows
 
     def visualize(self, img_batch, predicted_flows):
@@ -216,16 +219,16 @@ class RAFT_OF:
 Example usage of RAFT_OF
 '''
 
-raftof = RAFT_OF()
+# raftof = RAFT_OF()
 
-video_url = "https://download.pytorch.org/tutorial/pexelscom_pavel_danilyuk_basketball_hd.mp4"
-video_path = Path(tempfile.mkdtemp()) / "basketball.mp4"
-_ = urlretrieve(video_url, video_path)
+# video_url = "https://download.pytorch.org/tutorial/pexelscom_pavel_danilyuk_basketball_hd.mp4"
+# video_path = Path(tempfile.mkdtemp()) / "basketball.mp4"
+# _ = urlretrieve(video_url, video_path)
 
 
-from torchvision.io import read_video
-frames, _, _ = read_video(str(video_path), output_format="TCHW")
-flows = raftof.predict_flow_video(frames[0:10,:])
+# from torchvision.io import read_video
+# frames, _, _ = read_video(str(video_path), output_format="TCHW")
+# flows = raftof.predict_flow_video(frames[0:10,:])
 # raftof.visualize(frames[0:9,:],flows)
 
 def write_flow_yaml(flow, filename):
@@ -284,6 +287,24 @@ def write_flow_yaml(flow, filename):
         
         f.write(" ]\n")
 
+# from torchvision.utils import save_image
+# import os
+# import torch.nn.functional as F
+
+# out_path = r'C:\Users\lahir\Downloads\dir'
+# for i in range(flows[-1].size(0)):
+#     img = frames[i,:]
+#     resized = F.interpolate(
+#         img[None,:,:,:], 
+#         size=(520, 960), 
+#         mode='bilinear', 
+#         align_corners=False 
+#     )
+#     img = resized[0,:,:,:]
+#     f = flows[-1][i,:]
+#     save_image(img/255, os.path.join(out_path,'imgs',f'img_{i}.png'))
+#     f = f.permute(1,2,0).cpu().numpy()
+#     write_flow_yaml(f, os.path.join(out_path,'flow',f'flow_{i}.txt'))
 # f = flows[-1].permute(0,2,3,1).cpu().numpy()
 # write_flow_yaml(f[0], r'C:\Users\lahir\Downloads\test.flo')
 
