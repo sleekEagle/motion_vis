@@ -20,7 +20,6 @@ def get_database(data, subset, root_path, video_path_formatter):
     video_ids = []
     video_paths = []
     annotations = []
-
     for key, value in data['database'].items():
         this_subset = value['subset']
         if this_subset == subset:
