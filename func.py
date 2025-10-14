@@ -216,14 +216,75 @@ class RAFT_OF:
 Example usage of RAFT_OF
 '''
 
-# raftof = RAFT_OF()
+raftof = RAFT_OF()
 
-# video_url = "https://download.pytorch.org/tutorial/pexelscom_pavel_danilyuk_basketball_hd.mp4"
-# video_path = Path(tempfile.mkdtemp()) / "basketball.mp4"
-# _ = urlretrieve(video_url, video_path)
+video_url = "https://download.pytorch.org/tutorial/pexelscom_pavel_danilyuk_basketball_hd.mp4"
+video_path = Path(tempfile.mkdtemp()) / "basketball.mp4"
+_ = urlretrieve(video_url, video_path)
 
 
-# from torchvision.io import read_video
-# frames, _, _ = read_video(str(video_path), output_format="TCHW")
-# flows = raftof.predict_flow_video(frames[0:10,:])
+from torchvision.io import read_video
+frames, _, _ = read_video(str(video_path), output_format="TCHW")
+flows = raftof.predict_flow_video(frames[0:10,:])
 # raftof.visualize(frames[0:9,:],flows)
+
+def write_flow_yaml(flow, filename):
+    """
+    Write optical flow to OpenCV YAML format
+    
+    Args:
+        flow: numpy array of shape (height, width, 2) 
+        filename: output YAML filename
+    """
+    height, width = flow.shape[:2]
+    
+    # Flatten the flow data in row-major order
+    # OpenCV stores data as [u1, v1, u2, v2, u3, v3, ...]
+    flattened_data = flow.reshape(-1, 2).flatten()
+    
+    with open(filename, 'w') as f:
+        # Write YAML header
+        f.write("%YAML:1.0\n")
+        
+        # Write matrix metadata
+        f.write("mat: !!opencv-matrix\n")
+        f.write(f"   rows: {height}\n")
+        f.write(f"   cols: {width}\n")
+        f.write('   dt: "2f"\n')  # 2 channels of float
+        
+        # Write data section
+        f.write("   data: [ ")
+        
+        # Format numbers in scientific notation like OpenCV
+        data_lines = []
+        current_line = []
+        
+        for i, value in enumerate(flattened_data):
+            # Format in scientific notation with proper precision
+            if value >= 0:
+                formatted = f"{value:.8e}"
+            else:
+                formatted = f"{value:.8e}".replace('e-0', 'e-').replace('e+0', 'e+')
+            
+            current_line.append(formatted)
+            
+            # Break into lines of 4 elements each (like OpenCV does)
+            if len(current_line) == 4:
+                data_lines.append(", ".join(current_line))
+                current_line = []
+        
+        # Add any remaining elements
+        if current_line:
+            data_lines.append(", ".join(current_line))
+        
+        # Write data with proper indentation and line breaks
+        f.write(data_lines[0])
+        for line in data_lines[1:]:
+            f.write(",\n        " + line)
+        
+        f.write(" ]\n")
+
+# f = flows[-1].permute(0,2,3,1).cpu().numpy()
+# write_flow_yaml(f[0], r'C:\Users\lahir\Downloads\test.flo')
+
+
