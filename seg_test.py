@@ -25,14 +25,6 @@ import pandas as pd
 import func
 import matplotlib.pyplot as plt
 
-path = r'C:\Users\lahir\Downloads\test_out\40'
-# list all files under `path` (recursively) and print their full paths
-
-
-p = os.path.join(path, '00005.png')
-img = Image.open(p).convert('RGB')
-img = np.array(img,dtype=np.uint32)
-
 def read_video(path):
     files = [str(p) for p in Path(path).rglob('*') if p.is_file()]
     files.sort()
@@ -75,14 +67,60 @@ def video_recolor(video):
 
 
 
-dir_path = r'C:\Users\lahir\Downloads\test_out\35'
-video = read_video(dir_path)
-gray = video_recolor(video)
+#read model options
+opt_path = "models/r3d/ucf101.json"
+with open(opt_path, "r") as f:
+    model_opt = json.load(f)
+model_opt = Namespace(**model_opt)
+
+model = generate_model(model_opt)
+model = resume_model(model_opt.resume_path, model_opt.arch, model)
+model.eval()
+
+model_opt.inference_batch_size = 1
+for attribute in dir(model_opt):
+    if "path" in str(attribute) and getattr(model_opt, str(attribute)) != None:
+        setattr(model_opt, str(attribute), Path(getattr(model_opt, str(attribute))))
+inference_loader, inference_class_names = get_inference_utils(model_opt)
+class_labels_map = {v.lower(): k for k, v in inference_class_names.items()}
+transform = inference_loader.dataset.spatial_transform
 
 
-flow = func.read_flow_yaml(r'C:\Users\lahir\Downloads\UCF101\raft_flow\Bowling\v_Bowling_g06_c06\flow_3.txt')
-flow_mag = np.sqrt(flow[:,:,0]**2 + flow[:,:,1]**2)
-show_gray_img(flow_mag)
+def importance():
+    THR = 1e-3
+    frmo_imp = r'C:\Users\lahir\Downloads\UCF101\frame_motion_importance.csv'
+    df = pd.read_csv(frmo_imp)
+    for idx, batch in enumerate(inference_loader):
+        inputs, targets = batch
+        target = targets[0][0]
+        print(f'{target} {idx/len(inference_loader)*100:.0f} % is done.', end='\r')
+        cls = class_labels_map[targets[0][0].split('_')[1].lower()]
+        if not target in df['vid_name'].values:
+            continue
+        
+        #get the important frames in terms of motion
+        row = df[df['vid_name']==target].iloc[0]
+        l_orig = row['orig_l']
+        l_list = row['l_list']
+        l_list = np.array([float(val) for val in l_list.replace('[','').replace(']','').split(',')])
+        l_red = np.maximum((l_orig - l_list)/l_orig,0)
+        valid_idx = np.argwhere(l_red > THR)[:,0]
+        if len(valid_idx) == 0:
+            continue
+
+        pass
 
 
-pass
+# dir_path = r'C:\Users\lahir\Downloads\test_out\35'
+# video = read_video(dir_path)
+# gray = video_recolor(video)
+
+
+# flow = func.read_flow_yaml(r'C:\Users\lahir\Downloads\UCF101\raft_flow\Bowling\v_Bowling_g06_c06\flow_3.txt')
+# flow_mag = np.sqrt(flow[:,:,0]**2 + flow[:,:,1]**2)
+# show_gray_img(flow_mag)
+
+
+if __name__ == '__main__':
+    importance()
+
