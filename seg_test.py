@@ -109,6 +109,26 @@ def importance():
             continue
 
         pass
+    video = inputs[0]
+
+def mock_importance():
+    video = read_video(r'C:\Users\lahir\Downloads\UCF101\jpgs\ApplyEyeMakeup\v_ApplyEyeMakeup_g01_c01')
+    video = video[:12]
+    seg_video = read_video(r'C:\Users\lahir\Downloads\test_out\35')
+    seg_video = video_recolor(seg_video)
+
+    # func.play_tensor_video_opencv(torch.tensor(seg_video), fps=1)
+    flow_dir = r'C:\Users\lahir\Downloads\UCF101\raft_flow\ApplyEyeMakeup\v_ApplyEyeMakeup_g01_c01'
+    flow_files = sorted([str(p) for p in Path(flow_dir).rglob('*') if p.is_file()])
+    flow = np.empty((len(flow_files),240,320,2),dtype=np.float32)
+    for idx, f in enumerate(flow_files):
+        flow[idx,:] = func.read_flow_yaml(f)
+
+    # func.play_tensor_video_opencv(torch.tensor(flow_mag), fps=1)
+
+
+
+    pass
 
 
 # dir_path = r'C:\Users\lahir\Downloads\test_out\35'
@@ -117,10 +137,10 @@ def importance():
 
 
 # flow = func.read_flow_yaml(r'C:\Users\lahir\Downloads\UCF101\raft_flow\Bowling\v_Bowling_g06_c06\flow_3.txt')
-# flow_mag = np.sqrt(flow[:,:,0]**2 + flow[:,:,1]**2)
+# flow_mag = np.sqrt(flow[:,:,:,0]**2 + flow[:,:,:,1]**2)
 # show_gray_img(flow_mag)
 
 
 if __name__ == '__main__':
-    importance()
+    mock_importance()
 
