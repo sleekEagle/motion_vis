@@ -75,8 +75,14 @@ def video_recolor(video):
 
 
 
-dir_path = r'C:\Users\lahir\Downloads\test_out\40'
+dir_path = r'C:\Users\lahir\Downloads\test_out\35'
 video = read_video(dir_path)
 gray = video_recolor(video)
+
+
+flow = func.read_flow_yaml(r'C:\Users\lahir\Downloads\UCF101\raft_flow\Bowling\v_Bowling_g06_c06\flow_3.txt')
+flow_mag = np.sqrt(flow[:,:,0]**2 + flow[:,:,1]**2)
+show_gray_img(flow_mag)
+
 
 pass

@@ -308,4 +308,7 @@ def write_flow_yaml(flow, filename):
 # f = flows[-1].permute(0,2,3,1).cpu().numpy()
 # write_flow_yaml(f[0], r'C:\Users\lahir\Downloads\test.flo')
 
-
+def read_flow_yaml(filepath):
+    flow = cv2.FileStorage(filepath, cv2.FILE_STORAGE_READ)
+    flow_matrix = flow.getNode('mat').mat()
+    return flow_matrix
