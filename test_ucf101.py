@@ -323,7 +323,39 @@ def gradcam_flow():
         # display_vid = torch.concat([inputs[0].permute(1,0,2,3)[1:],flowcam[:,None,:].repeat(1,3,1,1)],dim=-2)
         # play_tensor_video_opencv(display_vid,fps=2)
         # play_tensor_video_opencv(flowcam[:,None,:].repeat(1,3,1,1),fps=2)
-    
+
+#video: tensor
+def get_gradcam_from_video(video, k):
+    pred = gmodel(video.unsqueeze(0))
+    lpred = pred.argmax()
+    if int(lpred) == k:
+        gmodel.zero_grad()
+        pred[0,lpred].backward()
+
+        act = gmodel.activations
+        grad = gmodel.gradients[0]
+        grad = grad.mean(dim=(2,3,4),keepdim=True)
+
+        cam = act * grad
+        cam = F.relu(cam.sum(dim=1,keepdim=True))
+        cam_int = F.interpolate(cam,
+                    size=(16,112,112),           # Target size
+                    mode='trilinear',         # 'nearest' | 'bilinear' | 'bicubic'
+                    align_corners=False      # Set True for some modes
+                ).squeeze(dim=1)
+        cam_int = (cam_int - cam_int.min())/(cam_int.max() - cam_int.min() + 1e-5)
+        
+        video = video.permute(1,2,3,0)
+        video = np.uint8((video - video.min())/(video.max() - video.min() + 1e-5)*255)
+
+        transformed = np.uint8(cam_int.detach().numpy()*255)
+        h_col = np.concatenate([cv2.applyColorMap(img, cv2.COLORMAP_JET)[None,:] for img in list(transformed[0])],axis=0)
+
+        final_img = cv2.addWeighted(video, 0.6, h_col, 0.4, 0)
+        final_img = torch.tensor(final_img).permute(0,3,1,2)
+
+        return cam_int, final_img
+
 
 def gradcam():
     root = "C:\\Users\\lahir\\Downloads\\UCF101\\jpgs"
@@ -340,36 +372,8 @@ def gradcam():
             c = int(d.split('_')[3][1:])
             n=0
             video = load_jpg_ucf101(l, g, c, n, inference_class_names, transform).transpose(0, 1)
-
-            pred = gmodel(video.unsqueeze(0))
-            lpred = pred.argmax()
-            if int(lpred) == k:
-                gmodel.zero_grad()
-                pred[0,lpred].backward()
-
-                act = gmodel.activations
-                grad = gmodel.gradients[0]
-                grad = grad.mean(dim=(2,3,4),keepdim=True)
-
-                cam = act * grad
-                cam = F.relu(cam.sum(dim=1,keepdim=True))
-                cam_int = F.interpolate(cam,
-                            size=(16,112,112),           # Target size
-                            mode='trilinear',         # 'nearest' | 'bilinear' | 'bicubic'
-                            align_corners=False      # Set True for some modes
-                        ).squeeze(dim=1)
-                cam_int = (cam_int - cam_int.min())/(cam_int.max() - cam_int.min() + 1e-5)
-                
-                video = video.permute(1,2,3,0)
-                video = np.uint8((video - video.min())/(video.max() - video.min() + 1e-5)*255)
-
-                transformed = np.uint8(cam_int.detach().numpy()*255)
-                h_col = np.concatenate([cv2.applyColorMap(img, cv2.COLORMAP_JET)[None,:] for img in list(transformed[0])],axis=0)
-
-                final_img = cv2.addWeighted(video, 0.6, h_col, 0.4, 0)
-                final_img = torch.tensor(final_img).permute(0,3,1,2)
-                
-                play_tensor_video_opencv(final_img, fps=2)
+            cam_int, final_img = get_gradcam_from_video(video, k)
+            func.play_tensor_video_opencv(final_img, fps=2)
 
 '''
 Acuracy : 0.8575338233022137
@@ -650,6 +654,5 @@ def gradcam_sal():
     
 
 if __name__ == '__main__':
-    motion_saliency_smooth()
-    gradcam_sal()
+    gradcam()
 

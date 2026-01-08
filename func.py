@@ -313,28 +313,28 @@ def read_flow_yaml(filepath):
     flow_matrix = flow.getNode('mat').mat()
     return flow_matrix
 
-'''
-raft calculated of
-min, max = -0.0966113 0.14445452
 
-of from repo
-min, max = -8.420414 4.1761527
+# raft calculated of
+# min, max = -0.0966113 0.14445452
 
-path = r'C:\Users\lahir\Downloads\frame_0001.flo.txt'
-f = read_flow_yaml(path)
-print(f.min(),f.max())
-'''
+# of from repo
+# min, max = -8.420414 4.1761527
 
-'''
-img from repo
-min, max = 0 63
-
-img from dataset
-0, 255
-
-path = r'C:\Users\lahir\Downloads\UCF101\jpgs\WritingOnBoard\v_WritingOnBoard_g25_c03\image_00047.jpg'
-img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-img.min(), img.max()
-'''
+# path = r'C:\Users\lahir\Downloads\frame_0001.flo.txt'
+# f = read_flow_yaml(path)
+# print(f.min(),f.max())
 
 
+
+# img from repo
+# min, max = 0 63
+
+# img from dataset
+# 0, 255
+
+# path = r'C:\Users\lahir\Downloads\UCF101\jpgs\WritingOnBoard\v_WritingOnBoard_g25_c03\image_00047.jpg'
+# img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+# img.min(), img.max()
+
+
+pass
