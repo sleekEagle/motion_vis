@@ -25,11 +25,7 @@ import pandas as pd
 import func
 
 
-def numericalSort(value):
-    numbers = re.compile(r'(\d+)')
-    parts = numbers.split(value)
-    parts[1::2] = map(int, parts[1::2])
-    return parts
+
 
 def load_jpg_ucf101(l, g, c, n, inference_class_names, transform):
     name = inference_class_names[l]
@@ -49,23 +45,13 @@ def load_jpg_ucf101(l, g, c, n, inference_class_names, transform):
 
     return torch.stack(video)
 
-#read model options
-opt_path = "models/r3d/ucf101.json"
-with open(opt_path, "r") as f:
-    model_opt = json.load(f)
-model_opt = Namespace(**model_opt)
 
-model = generate_model(model_opt)
-model = resume_model(model_opt.resume_path, model_opt.arch, model)
-model.eval()
 
-model_opt.inference_batch_size = 1
-for attribute in dir(model_opt):
-    if "path" in str(attribute) and getattr(model_opt, str(attribute)) != None:
-        setattr(model_opt, str(attribute), Path(getattr(model_opt, str(attribute))))
-inference_loader, inference_class_names = get_inference_utils(model_opt)
-class_labels_map = {v.lower(): k for k, v in inference_class_names.items()}
-transform = inference_loader.dataset.spatial_transform
+ucf101dm = func.UCF101_data_model()
+model = ucf101dm.model
+inference_loader = ucf101dm.inference_loader
+inference_class_names = ucf101dm.inference_class_names
+
 
 def main():
     # inputs, targets = iter(inference_loader).__next__()
@@ -469,7 +455,12 @@ def gradcam_sal():
             cv2.imwrite(os.path.join(out_dir,f'{n}.png'), final_img)
 
     
+def test_method():
+    video = ucf101dm.load_jpg_ucf101(r'C:\Users\lahir\Downloads\UCF101\jpgs\Archery\v_Archery_g25_c05')
+    func.play_tensor_video_opencv(video, fps=2)
+    pass
+
 
 if __name__ == '__main__':
-    gradcam()
+    test_method()
 

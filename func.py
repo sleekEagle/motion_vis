@@ -5,7 +5,9 @@ import numpy as np
 import torch.nn as nn
 from torchvision import models, transforms
 from sklearn.cluster import DBSCAN
-
+'''
+input video should be tensor of shape [T, 3, H, W]
+'''
 def play_tensor_video_opencv(tensor, fps=30, window_name="Tensor Video"):
     # Convert tensor to numpy and ensure correct format
     if isinstance(tensor, torch.Tensor):
@@ -524,5 +526,81 @@ class GradcamModel(nn.Module):
             final_img = torch.tensor(final_img).permute(0,3,1,2)
 
             return cam_int, final_img
+        
+
+
+
+'''
+acess the UCF101 model and inference loader
+'''
+import json
+from models.resnet3d.main import generate_model, get_inference_utils, resume_model
+from models.resnet3d.model import generate_model, make_data_parallel
+from argparse import Namespace
+import re
+import os
+from PIL import Image
+from glob import glob
+
+def numericalSort(value):
+    numbers = re.compile(r'(\d+)')
+    parts = numbers.split(value)
+    parts[1::2] = map(int, parts[1::2])
+    return parts
+
+class UCF101_data_model:
+    def __init__(self):
+        #read model options
+        opt_path = "models/r3d/ucf101.json"
+        with open(opt_path, "r") as f:
+            model_opt = json.load(f)
+        model_opt = Namespace(**model_opt)
+
+        #create model
+        self.model = generate_model(model_opt)
+        self.model = resume_model(model_opt.resume_path, model_opt.arch, self.model)
+        self.model.eval()
+
+        model_opt.inference_batch_size = 1
+        for attribute in dir(model_opt):
+            if "path" in str(attribute) and getattr(model_opt, str(attribute)) != None:
+                setattr(model_opt, str(attribute), Path(getattr(model_opt, str(attribute))))
+        self.inference_loader, self.inference_class_names = get_inference_utils(model_opt)
+        self.class_labels_map = {v.lower(): k for k, v in self.inference_class_names.items()}
+        self.transform = self.inference_loader.dataset.spatial_transform
+
+    def load_jpg_ucf101_param(self, l, g, c, n):
+        name = self.inference_class_names[l]
+        dir = os.path.join(
+            "C:\\Users\\lahir\\Downloads\\UCF101\\jpgs", name, "v_{}_g{}_c{}".format(name, str(g).zfill(2), str(c).zfill(2))
+        )
+        path = sorted(glob(dir + "/*"), key=numericalSort)
+
+        target_path = path[n * 16 : (n + 1) * 16]
+        if len(target_path) < 16:
+            print("not exist")
+            return False
+
+        video = []
+        for _p in target_path:
+            video.append(self.transform(Image.open(_p)))
+
+        return torch.stack(video)
+    
+    def load_jpg_ucf101(self, path, n=0):
+
+        path = sorted(glob(path + "/*"), key=numericalSort)
+
+        target_path = path[n * 16 : (n + 1) * 16]
+        if len(target_path) < 16:
+            print("not exist")
+            return False
+
+        video = []
+        for _p in target_path:
+            video.append(self.transform(Image.open(_p)))
+
+        return torch.stack(video)
+
     
 
