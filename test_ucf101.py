@@ -32,7 +32,7 @@ def load_jpg_ucf101(l, g, c, n, inference_class_names, transform):
     dir = os.path.join(
         "C:\\Users\\lahir\\Downloads\\UCF101\\jpgs", name, "v_{}_g{}_c{}".format(name, str(g).zfill(2), str(c).zfill(2))
     )
-    path = sorted(glob(dir + "/*"), key=numericalSort)
+    path = sorted(glob(dir + "/*"), key=func.numericalSort)
 
     target_path = path[n * 16 : (n + 1) * 16]
     if len(target_path) < 16:
@@ -456,8 +456,16 @@ def gradcam_sal():
 
     
 def test_method():
-    video = ucf101dm.load_jpg_ucf101(r'C:\Users\lahir\Downloads\UCF101\jpgs\Archery\v_Archery_g25_c05')
-    func.play_tensor_video_opencv(video, fps=2)
+    vid_path = r'C:\Users\lahir\Downloads\UCF101\jpgs\Archery\v_Archery_g25_c05'
+    video = ucf101dm.load_jpg_ucf101(vid_path)
+    # func.play_tensor_video_opencv(video, fps=2)
+
+    class_l = ucf101dm.class_labels_map[vid_path.split('\\')[-2].lower()]
+    gmodel = func.GradcamModel(model)
+    cam_int, final_img = gmodel.get_gradcam_from_video(video.permute(1,0,2,3), class_l)
+    func.play_tensor_video_opencv(final_img, fps=2)
+
+
     pass
 
 
