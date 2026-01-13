@@ -106,161 +106,6 @@ def main():
     #     video_orgimg.append(np.array(unnormalize(img)))
     # video_orgimg = np.array(video_orgimg)
 
-class AddGaussianNoise(object):
-    def __init__(self, mean=0., std=1.):
-        self.std = std
-        self.mean = mean
-        
-    def __call__(self, tensor):
-        return tensor + torch.randn(tensor.size()) * self.std + self.mean
-    
-    def __repr__(self):
-        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
-
-class GradcamModel(nn.Module):
-    def __init__(self, model):
-        super(GradcamModel, self).__init__()
-        self.model = model
-
-        #feature extraction model for video clustering
-        # weights = ResNet50_Weights.IMAGENET1K_V1
-        # resnetmodel = resnet50(weights=weights)
-        # self.feature_model = create_feature_extractor(resnetmodel, return_nodes={'avgpool':'f_layer'})
-        # self.feature_tr = weights.transforms()
-
-        self.model.layer4[2].conv3.register_forward_hook(self.save_activations)
-        self.model.layer4[2].conv3.register_backward_hook(self.save_gradients)
-
-        # add noise to input
-        #noise parameters from https://github.com/pkmr06/pytorch-smoothgrad
-        self.noise_tr = transforms.Compose([
-            AddGaussianNoise(mean=0., std=0.01)
-        ])
-
-    def save_activations(self, module, input, output):
-        self.activations = output
-
-    def save_gradients(self, module, grad_in, grad_out):
-        # grad_out[0][0,1:,:].min(), grad_out[0][0,1:,:].max()
-        self.gradients = grad_out
-
-    def forward(self, x):
-        out = self.model(x)
-        return out
-    
-    def replace_video(self, input, src_idx):
-        frames = input.clone()
-        return frames[:,src_idx,:,:][:,None,:].repeat(1,input.size(1),1,1)
-    
-    def copy_paste_frame(self, frames_in, src_idx, dst_idx):
-        frames = frames_in.clone()
-        frames[:,dst_idx,:] = frames[:,src_idx,:]
-        return frames
-        
-    def cluster_frames(self, x):
-        x = x.permute(1,0,2,3)
-        x = self.feature_tr(x)
-        f = self.feature_model(x)['f_layer'].squeeze()
-        f_norm = ((f-f.min())/(f.max()-f.min()+1e-5)).detach().numpy()
-        clustering = DBSCAN(eps=10, min_samples=2)
-        print(clustering.fit_predict(f_norm))
-
-        play_tensor_video_opencv(x,fps=5)
-    
-    def motion_importance(self, x):
-        pred = self.forward(x[None,:])
-        pred = F.softmax(pred,dim=1)
-        pred_cls_orig = torch.argmax(pred,dim=1).item()
-        pred_l_orig = pred[0,pred_cls_orig].item()
-        l_list = []
-        for i in range(x.size(1)):
-            x_rep = self.replace_video(x,i)
-            # play_tensor_video_opencv(x_rep.permute(1,0,2,3),fps=2)
-            pred = self.forward(x_rep[None,:])
-            pred = F.softmax(pred,dim=1)
-            pred_cls = torch.argmax(pred,dim=1).item()
-            pred_l = pred[0,pred_cls].item()
-            l_list.append(pred_l)
-
-        out = {
-            'orig_pred_cls': pred_cls_orig,
-            'orig_l': pred_l_orig,
-            'l_list': l_list
-        }
-        return out
-    
-    def frame_motion_importance(self, x):
-        pred = self.forward(x[None,:])
-        pred = F.softmax(pred,dim=1)
-        pred_cls_orig = torch.argmax(pred,dim=1).item()
-        pred_l_orig = pred[0,pred_cls_orig].item()
-
-        l_list = []
-        for i in range(x.size(1)-1):
-            x_cp = self.copy_paste_frame(x, i, i+1)
-            pred = self.forward(x_cp[None,:])
-            pred = F.softmax(pred,dim=1)
-            pred_cls = torch.argmax(pred,dim=1).item()
-            pred_l = pred[0,pred_cls].item()
-            l_list.append(pred_l)
-        
-        out = {
-            'orig_pred_cls': pred_cls_orig,
-            'orig_l': pred_l_orig,
-            'l_list': l_list
-        }
-        return out
-    
-    def calc_gradcam(self, x):
-        act = self.activations
-        grad = self.gradients[0]
-        grad = grad.mean(dim=(2,3,4),keepdim=True)
-        cam = act * grad
-        cam = F.relu(cam.sum(dim=1,keepdim=True))
-        cam_int = F.interpolate(cam,
-                            size=(16,112,112),           # Target size
-                            mode='trilinear',         # 'nearest' | 'bilinear' | 'bicubic'
-                            align_corners=False      # Set True for some modes
-                        ).squeeze(dim=1)
-        cam_int = (cam_int - cam_int.min())/(cam_int.max() - cam_int.min() + 1e-5)
-        return cam_int
-    
-    def calc_flow_saliency(self, x):
-        slc,_ = torch.max(x.grad ,dim=0)
-        slc = slc[1:,:]
-        slc = slc[:,:,:,None].repeat(1,1,1,2)
-
-        x = x.detach()
-        dI_dF, _ = func.input_flow_grad(x)
-
-        # d = torch.sum(dI_dF**2,dim=-1)
-        # from matplotlib import pyplot as plt
-        # plt.imshow(d[4,:].cpu().numpy())
-        # plt.show()
-
-        # plt.imshow(slc[4,:,:,0].cpu().numpy())
-        # plt.show()
-
-        dPred_dF = slc * dI_dF
-        dPred_dF[:,:5,:] = 0
-        dPred_dF[:,-5:,:] = 0
-        dPred_dF[:,:,:5] = 0
-        dPred_dF[:,:,-5:] = 0
-
-        dPred_dF = torch.sum(dPred_dF, dim=3)
-        dPred_dF =  F.relu(dPred_dF)
-
-        # plt.imshow(dPred_dF[6,:].cpu().numpy())
-        # plt.show()
-
-        # dPred_dF = (dPred_dF-dPred_dF.min())/(dPred_dF.max()-dPred_dF.min())
-        # from matplotlib import pyplot as plt
-        # plt.imshow(sal[4,:,:][:,:,None].repeat(1,1,3).cpu().numpy())
-        # plt.show()
-        
-        return dPred_dF
-
-gmodel = GradcamModel(model)
 
 def gradcam_flow():
     for idx, batch in enumerate(inference_loader):
@@ -325,39 +170,11 @@ def gradcam_flow():
         # play_tensor_video_opencv(flowcam[:,None,:].repeat(1,3,1,1),fps=2)
 
 #video: tensor
-def get_gradcam_from_video(video, k):
-    pred = gmodel(video.unsqueeze(0))
-    lpred = pred.argmax()
-    if int(lpred) == k:
-        gmodel.zero_grad()
-        pred[0,lpred].backward()
 
-        act = gmodel.activations
-        grad = gmodel.gradients[0]
-        grad = grad.mean(dim=(2,3,4),keepdim=True)
-
-        cam = act * grad
-        cam = F.relu(cam.sum(dim=1,keepdim=True))
-        cam_int = F.interpolate(cam,
-                    size=(16,112,112),           # Target size
-                    mode='trilinear',         # 'nearest' | 'bilinear' | 'bicubic'
-                    align_corners=False      # Set True for some modes
-                ).squeeze(dim=1)
-        cam_int = (cam_int - cam_int.min())/(cam_int.max() - cam_int.min() + 1e-5)
-        
-        video = video.permute(1,2,3,0)
-        video = np.uint8((video - video.min())/(video.max() - video.min() + 1e-5)*255)
-
-        transformed = np.uint8(cam_int.detach().numpy()*255)
-        h_col = np.concatenate([cv2.applyColorMap(img, cv2.COLORMAP_JET)[None,:] for img in list(transformed[0])],axis=0)
-
-        final_img = cv2.addWeighted(video, 0.6, h_col, 0.4, 0)
-        final_img = torch.tensor(final_img).permute(0,3,1,2)
-
-        return cam_int, final_img
 
 
 def gradcam():
+    gmodel = func.GradcamModel(model)
     root = "C:\\Users\\lahir\\Downloads\\UCF101\\jpgs"
     transform = inference_loader.dataset.spatial_transform
 
@@ -372,7 +189,7 @@ def gradcam():
             c = int(d.split('_')[3][1:])
             n=0
             video = load_jpg_ucf101(l, g, c, n, inference_class_names, transform).transpose(0, 1)
-            cam_int, final_img = get_gradcam_from_video(video, k)
+            cam_int, final_img = gmodel.get_gradcam_from_video(video, k)
             func.play_tensor_video_opencv(final_img, fps=2)
 
 '''
