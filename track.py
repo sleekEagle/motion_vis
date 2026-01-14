@@ -3,6 +3,8 @@ import os
 from PIL import Image
 import torchvision.transforms as T
 import numpy as np
+import cv2
+import func
 
 def plot_with_pytorch(video_tensor, points_tensor, visibility_tensor=None,
                      output_path="tracked_video_pytorch.mp4"):
@@ -114,17 +116,55 @@ class CoTracker:
         video = torch.concatenate([transform(Image.open(os.path.join(video_dir, f)).convert('RGB')) * 255 for f in img_files], dim=0).unsqueeze(0)
         return video.float().to(self.device)
     
-    def track_video(self, video):
-        queries = torch.tensor([
-        [0., 100., 150.],  # point tracked from the first frame
-        [10., 200., 78.], # frame number 10
-        [20., 150., 65.], # ...
-        [30., 90., 200.]
-        ])
+    import matplotlib.pyplot as plt
+
+    def get_points_to_track(self, video, mask):
+        #define grid
+        H, W = video.size(2), video.size(3)
+        stride = 1  # 4–8 is good
+
+        ys, xs = torch.meshgrid(
+            torch.arange(0, H, stride),
+            torch.arange(0, W, stride),
+            indexing="ij"
+        )
+        points = torch.stack([xs.flatten(), ys.flatten()], dim=-1)
+
+        in_mask = mask[0,points[:,1], points[:,0]]
+        masked_points = points[in_mask>0]
+
+        return masked_points
+
+    import matplotlib.pyplot as plt
+
+    def track_video_area(self, video, mask):
+        points = self.get_points_to_track(video, mask)
+        zeros = torch.zeros(points.size(0),1)
+        queries = torch.concatenate([zeros, points], dim=1)
+        # queries = queries[:1000,:]
+
+
+        # gray = video[0,:].permute(1,2,0).numpy()
+        # gray = cv2.cvtColor(gray, cv2.COLOR_RGB2GRAY)
+        # gray =  (gray - gray.min())/(gray.max() - gray.min() + 1e-5)
+        # gray = gray * 255.0
+        # gray = gray.astype(np.uint8)
+        # plt.imshow(gray, cmap='gray')
+        # plt.scatter(points[:, 0], points[:, 1], s=10, c="red")
+        # plt.axis("off")
+        # plt.show()
+
+        # queries = torch.tensor([
+        # [0., 100., 150.],  # point tracked from the first frame
+        # [10., 200., 78.], # frame number 10/
+        # [20., 150., 65.], # ...
+        # [30., 90., 200.]
+        # ])
         if torch.cuda.is_available():
             queries = queries.cuda()
         # return self.cotracker(video, grid_size=self.grid_size)
-        return self.cotracker(video, queries=queries[None])
+        # ret = self.cotracker(video.unsqueeze(0).cuda(), queries=queries[None])
+        return self.cotracker(video.unsqueeze(0).cuda(), queries=queries[None])
     
     def track_from_path(self, path, start_idx=0, n_imgs=50):
         video = self.load_video_from_frames(path, start_idx, n_imgs)
@@ -133,15 +173,15 @@ class CoTracker:
 
 
 #how to use
-tracker = CoTracker(grid_size=20)
-video = tracker.load_video_from_frames(r'C:\Users\lahir\Downloads\UCF101\jpgs\TennisSwing\v_TennisSwing_g25_c05',
-                                       start_idx=0,
-                                       n_imgs=100)
-print('tracking....')
-pred_tracks, pred_visibility = tracker.track_video(video)
-print('saving....')
-plot_with_pytorch(video[0,:], pred_tracks[0,:], pred_visibility[0,:],
-                     output_path="tracked_video_pytorch.mp4")
+# tracker = CoTracker(grid_size=20)
+# video = tracker.load_video_from_frames(r'C:\Users\lahir\Downloads\UCF101\jpgs\TennisSwing\v_TennisSwing_g25_c05',
+#                                        start_idx=0,
+#                                        n_imgs=100)
+# print('tracking....')
+# pred_tracks, pred_visibility = tracker.track_video(video)
+# print('saving....')
+# plot_with_pytorch(video[0,:], pred_tracks[0,:], pred_visibility[0,:],
+#                      output_path="tracked_video_pytorch.mp4")
 
 pass
 

@@ -454,8 +454,10 @@ def gradcam_sal():
 
             cv2.imwrite(os.path.join(out_dir,f'{n}.png'), final_img)
 
-    
+from track import CoTracker
+
 def test_method():
+    THRESHOLD = 0.7
     vid_path = r'C:\Users\lahir\Downloads\UCF101\jpgs\Archery\v_Archery_g25_c05'
     video = ucf101dm.load_jpg_ucf101(vid_path)
     # func.play_tensor_video_opencv(video, fps=2)
@@ -463,8 +465,16 @@ def test_method():
     class_l = ucf101dm.class_labels_map[vid_path.split('\\')[-2].lower()]
     gmodel = func.GradcamModel(model)
     cam_int, final_img = gmodel.get_gradcam_from_video(video.permute(1,0,2,3), class_l)
-    func.play_tensor_video_opencv(final_img, fps=2)
+    # func.play_tensor_video_opencv(final_img, fps=2)
+    # func.play_tensor_video_opencv(cam_int.permute(1,0,2,3).repeat(1,3,1,1), fps=2)
+    #threshold image
+    cam_int[cam_int > THRESHOLD] = 1.0
+    cam_int[cam_int <= THRESHOLD] = 0.0
+    # func.play_tensor_video_opencv(cam_int.permute(1,0,2,3).repeat(1,3,1,1), fps=2)
 
+
+    tracker = CoTracker()
+    tracker.track_video_area(video, cam_int.squeeze(0))
 
     pass
 

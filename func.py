@@ -5,6 +5,39 @@ import numpy as np
 import torch.nn as nn
 from torchvision import models, transforms
 from sklearn.cluster import DBSCAN
+
+'''
+input is a tensor
+input img shape: [H, W] if grayscale
+or [H, W, 3] if RGB
+'''
+def show_img(img):
+    import matplotlib.pyplot as plt
+    img = img.detach().cpu().numpy()
+    plt.imshow(img)
+    plt.axis("off")
+    plt.show()
+
+#input img shape: [H, W], np array
+def show_gray_image(gray):
+    import matplotlib.pyplot as plt
+    gray =  (gray - gray.min())/(gray.max() - gray.min() + 1e-5)
+    gray = gray * 255.0
+    gray = gray.astype(np.uint8)
+    plt.imshow(gray, cmap='gray')
+    plt.axis("off")
+    plt.show()
+
+#input img shape: [H, W, 3], np array
+def show_rgb_image(img):
+    import matplotlib.pyplot as plt
+    img =  (img - img.min())/(img.max() - img.min() + 1e-5)
+    img = img * 255.0
+    img = img.astype(np.uint8)
+    plt.imshow(img)
+    plt.axis("off")
+    plt.show()
+
 '''
 input video should be tensor of shape [T, 3, H, W]
 '''
