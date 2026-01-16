@@ -455,8 +455,11 @@ def gradcam_sal():
             cv2.imwrite(os.path.join(out_dir,f'{n}.png'), final_img)
 
 from track import CoTracker
+import seg
 
 def test_method():
+    #feature extraction model
+    feat_model = seg.DinoFeatureExtractor()
     THRESHOLD = 0.7
     vid_path = r'C:\Users\lahir\Downloads\UCF101\jpgs\Archery\v_Archery_g25_c05'
     video = ucf101dm.load_jpg_ucf101(vid_path)
@@ -474,9 +477,20 @@ def test_method():
 
 
     tracker = CoTracker()
-    tracker.track_video_area(video, cam_int.squeeze(0))
+    pred_tracks, pred_visibility = tracker.track_video_area(video, cam_int.squeeze(0), start_idx=0)
+
+    # for i in range(pred_tracks.size(1)):
+    #     p = pred_visibility[0,i,:]
+    #     print(p.sum()/p.size(0))
+
+    # import track
+
+    # track.plot_with_pytorch(video, pred_tracks[0,:], pred_visibility[0,:],
+    #                  output_path="tracked_video_pytorch.mp4")
 
     pass
+
+
 
 
 if __name__ == '__main__':

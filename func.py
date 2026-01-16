@@ -38,6 +38,24 @@ def show_rgb_image(img):
     plt.axis("off")
     plt.show()
 
+def normalize_to_neg1_pos1(tensor):
+    """
+    Normalize ANY tensor to [-1, 1] range using min-max scaling
+    Works for any value range
+    """
+    # Get min and max values
+    t_min = tensor.min()
+    t_max = tensor.max()
+    
+    # Avoid division by zero
+    if t_max - t_min == 0:
+        return torch.zeros_like(tensor)
+    
+    # Normalize to [0, 1] first, then to [-1, 1]
+    normalized = 2 * ((tensor - t_min) / (t_max - t_min)) - 1
+    
+    return normalized
+
 '''
 input video should be tensor of shape [T, 3, H, W]
 '''
@@ -186,11 +204,11 @@ def input_flow_grad_mag(video):
     return dI_dF, flow
 
 
-
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
 import torchvision.transforms.functional as tvis_F
+import torchvision.transforms as T
 from torchvision.models.optical_flow import Raft_Large_Weights
 from torchvision.models.optical_flow import raft_large
 from torchvision.utils import flow_to_image
@@ -207,31 +225,70 @@ class RAFT_OF:
         self.model = raft_large(weights=Raft_Large_Weights.DEFAULT, progress=False).to(self.device)
         self.model = self.model.eval()
 
-    def preprocess(self, img1_batch, img2_batch):
-        img1_batch = tvis_F.resize(img1_batch, size=[520, 960], antialias=False)
-        img2_batch = tvis_F.resize(img2_batch, size=[520, 960], antialias=False)
-        img1_batch , img2_batch = self.transforms(img1_batch, img2_batch)
-        self.img1_batch = img1_batch
-        return img1_batch , img2_batch
+    def resize_flow_interpolate(self, flow, target_size=(112, 112), mode='bilinear'):
+        """
+        Resize optical flow using interpolation
+        
+        Args:
+            flow: Tensor of shape [B, 2, H, W] or [B, C, H, W]
+            target_size: (height, width) tuple
+            mode: 'bilinear' (smooth) or 'nearest' (preserve edges)
+        """
+        # Resize flow
+        flow_resized = F.interpolate(
+            flow, 
+            size=target_size, 
+            mode=mode, 
+            align_corners=False
+        )
+        
+        # IMPORTANT: Scale flow values to match new spatial dimensions
+        # Flow is displacement in pixels, so we need to scale it
+        scale_h = target_size[0] / flow.shape[2]  # height scale
+        scale_w = target_size[1] / flow.shape[3]  # width scale
+        
+        # Scale flow vectors (x-component * scale_w, y-component * scale_h)
+        flow_resized[:, 0, :, :] *= scale_w  # x component
+        flow_resized[:, 1, :, :] *= scale_h  # y component
+        
+        return flow_resized
+
+    def preprocess(self, batch):
+        transforms = T.Compose(
+            [
+                T.ConvertImageDtype(torch.float32),
+                T.Resize(size=(224, 224)),
+            ]
+        )
+        batch = transforms(batch)
+        return batch
+    
+
 
     def predict_flow_batch(self,batch1,batch2):
-        img1_batch, img2_batch = self.preprocess(batch1, batch2)
+        batch1_scale = normalize_to_neg1_pos1(batch1)
+        batch2_scale = normalize_to_neg1_pos1(batch2)
+        img1_batch = self.preprocess(batch1_scale)
+        img2_batch = self.preprocess(batch2_scale)
+
         with torch.no_grad():
             flows = self.model(img1_batch.to(self.device), img2_batch.to(self.device))
+
         return flows
     
     def predict_flow_video(self, video):
-        flows = torch.empty(0).to(self.device)
-        for i in range(video.size(0)-1):
-            img1_batch = video[i,:][None,:]
-            img2_batch = video[i+1,:][None,:]
-            f = self.predict_flow_batch(img1_batch,img2_batch)[-1]
-            flows = torch.cat((flows,f),dim=0)
-        return flows
+        img1_batch = video[:-1,:]
+        img2_batch = video[1:,:]
+        flow = self.predict_flow_batch(img1_batch,img2_batch)[-1]
+
+        #resize flow if needed
+        if video.size(2)!=flow.size(2) or video.size(3)!=flow.size(3):
+            flow = self.resize_flow_interpolate(flow, target_size=(video.size(2), video.size(3)), mode='bilinear')
+        return flow
 
     def visualize(self, img_batch, predicted_flows):
-        flow_imgs = flow_to_image(predicted_flows[-1])
-        img_batch = [(img1 + 1) / 2 for img1 in self.img1_batch]
+        flow_imgs = flow_to_image(predicted_flows)
+        img_batch = (img_batch - img_batch.min())/(img_batch.max() - img_batch.min()+1e-5)
         grid = [[img1, flow_img] for (img1, flow_img) in zip(img_batch, flow_imgs)]
         self.plot(grid)
 
@@ -247,7 +304,7 @@ class RAFT_OF:
         for row_idx, row in enumerate(imgs):
             for col_idx, img in enumerate(row):
                 ax = axs[row_idx, col_idx]
-                img = F.to_pil_image(img.to("cpu"))
+                img = tvis_F.to_pil_image(img.to("cpu"))
                 ax.imshow(np.asarray(img), **imshow_kwargs)
                 ax.set(xticklabels=[], yticklabels=[], xticks=[], yticks=[])
 

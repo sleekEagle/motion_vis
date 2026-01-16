@@ -137,10 +137,10 @@ class CoTracker:
 
     import matplotlib.pyplot as plt
 
-    def track_video_area(self, video, mask):
+    def track_video_area(self, video, mask, start_idx=0):
         points = self.get_points_to_track(video, mask)
-        zeros = torch.zeros(points.size(0),1)
-        queries = torch.concatenate([zeros, points], dim=1)
+        frame_idx = torch.zeros(points.size(0),1)+start_idx
+        queries = torch.concatenate([frame_idx, points], dim=1)
         # queries = queries[:1000,:]
 
 
