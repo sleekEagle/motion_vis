@@ -38,6 +38,47 @@ def show_rgb_image(img):
     plt.axis("off")
     plt.show()
 
+def flow_to_rgb(flow):
+    """
+    Convert optical flow (2, H, W) to RGB image (H, W, 3)
+    where hue represents direction and value represents magnitude
+    
+    Args:
+        flow: numpy array of shape (2, H, W)
+    
+    Returns:
+        rgb: numpy array of shape (H, W, 3) in range [0, 255]
+    """
+    # Extract flow components
+    u = flow[0]  # horizontal flow (x-direction)
+    v = flow[1]  # vertical flow (y-direction)
+    
+    # Calculate flow magnitude and angle
+    magnitude = np.sqrt(u**2 + v**2)
+    angle = np.arctan2(v, u)  # in radians, range [-π, π]
+    
+    # Normalize magnitude to [0, 1]
+    max_mag = np.max(magnitude) if np.max(magnitude) > 0 else 1
+    magnitude_norm = magnitude / max_mag
+    
+    # Convert angle from [-π, π] to [0, 1] for hue
+    hue = (angle + np.pi) / (2 * np.pi)  # range [0, 1]
+    
+    # Create HSV image
+    hsv = np.zeros((flow.shape[1], flow.shape[2], 3), dtype=np.float32)
+    hsv[..., 0] = hue  # Hue
+    hsv[..., 1] = 1.0  # Full saturation
+    hsv[..., 2] = magnitude_norm  # Value from magnitude
+    
+    # Convert HSV to RGB
+    from matplotlib.colors import hsv_to_rgb
+    rgb = hsv_to_rgb(hsv)
+    
+    # Scale to 0-255 for image display
+    rgb = (rgb * 255).astype(np.uint8)
+    
+    return rgb
+
 def normalize_to_neg1_pos1(tensor):
     """
     Normalize ANY tensor to [-1, 1] range using min-max scaling
