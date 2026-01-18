@@ -26,18 +26,22 @@ import func
 
 
 #create model and data loader
-ucf101dm = func.UCF101_data_model()
-model = ucf101dm.model
-model.to('cuda')
-model.eval()
-inference_loader = ucf101dm.inference_loader
-class_names = ucf101dm.inference_class_names
-class_labels = {}
-for k in class_names.keys():
-    cls_name = class_names[k]
-    class_labels[cls_name] = k
+# ucf101dm = func.UCF101_data_model()
+# model = ucf101dm.model
+# model.to('cuda')
+# model.eval()
+# inference_loader = ucf101dm.inference_loader
+# class_names = ucf101dm.inference_class_names
+# class_labels = {}
+# for k in class_names.keys():
+#     cls_name = class_names[k]
+#     class_labels[cls_name] = k
 
-
+'''
+replace the whole video with just one frame repeated
+and see how the prediction changes
+'''
+#**************************************************************************************
 def motion_importance(video):
     # video = ucf101dm.load_jpg_ucf101(vid_path)
     # video = video.unsqueeze(0).permute(0,2,1,3,4)
@@ -65,6 +69,7 @@ def motion_importance(video):
     ret = {
         'pred_original_class': class_names[pred_cls],
         'pred_original_logit': logit_original,
+        'all_logits': logits,
         'max_frame_logit': max_logit,
         'percent_change': perc_change,
         'any_frame_correct': any_correct
@@ -100,11 +105,32 @@ def motion_importance_dataset():
     with open(output_path, "w") as f:
         json.dump(anlysis_data, f)
 
+#**************************************************************************************
 
+def create_frame_cluster_idxs(idx_list, len_array=16):
+    idx_list.sort()
+    new_array = np.zeros((len_array,), dtype=int)
 
+    assert len(idx_list) > 0 , "idx_list must contain at least one index."
 
+    if len(idx_list) == 1:
+        new_array[:] = idx_list[0]
+        return new_array
 
+    new_array[0:idx_list[1]] = idx_list[0]
+    for idx in range(1, len(idx_list)-1):
+        new_array[idx_list[idx]:idx_list[idx+1]] = idx_list[idx]
+    new_array[idx_list[-1]:] = idx_list[-1]
+    
+    return new_array
 
 
 if __name__ == '__main__':
-    motion_importance_dataset()
+    cluster_array = create_frame_cluster_idxs([0,4,9, 12, 15])
+    print(cluster_array)
+    pass
+
+
+
+
+
