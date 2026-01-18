@@ -26,16 +26,16 @@ import func
 
 
 #create model and data loader
-# ucf101dm = func.UCF101_data_model()
-# model = ucf101dm.model
-# model.to('cuda')
-# model.eval()
-# inference_loader = ucf101dm.inference_loader
-# class_names = ucf101dm.inference_class_names
-# class_labels = {}
-# for k in class_names.keys():
-#     cls_name = class_names[k]
-#     class_labels[cls_name] = k
+ucf101dm = func.UCF101_data_model()
+model = ucf101dm.model
+model.to('cuda')
+model.eval()
+inference_loader = ucf101dm.inference_loader
+class_names = ucf101dm.inference_class_names
+class_labels = {}
+for k in class_names.keys():
+    cls_name = class_names[k]
+    class_labels[cls_name] = k
 
 '''
 replace the whole video with just one frame repeated
@@ -79,6 +79,7 @@ def motion_importance(video):
 
 def motion_importance_dataset():
     output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance.json')
+    change_threshold = 0.05
     anlysis_data = {}
     n_samples, n_correct = 0, 0
     for idx, batch in enumerate(inference_loader):
@@ -88,6 +89,39 @@ def motion_importance_dataset():
         gt_class_name = targets[0][0].split('_')[1]
         seq = targets[0][1]
         ret = motion_importance(video.unsqueeze(0))
+        pred_logit = ret['pred_original_logit']
+        all_logits = ret['all_logits']
+        percent_change = ret['percent_change']
+        max_logit = ret['max_frame_logit']
+        gt_class = class_labels[gt_class_name]
+        if percent_change > change_threshold:
+            sorted_indices = [i for i, _ in sorted(enumerate(all_logits), key=lambda x: x[1], reverse=True)]
+            for i in range(2, len(sorted_indices)):
+                valuable_indices = sorted_indices[0:i]
+                clustered_ids = create_frame_cluster_idxs(valuable_indices)
+                #update the video with only the valuable frames
+                video_ = video_keep_given_frames(video, clustered_ids)
+                pred_ = model(video_.unsqueeze(0))
+                pred_ = F.softmax(pred_,dim=1)
+                pred_cls_ = torch.argmax(pred_,dim=1)
+                logit = pred_[:,gt_class].item()
+
+                pass
+
+
+
+
+            pass
+
+
+
+
+
+
+
+
+
+
         seq = ','.join([str(s) for s in seq])
         ret['seq'] = seq
         ret['gt_class'] = gt_class_name 
@@ -106,6 +140,13 @@ def motion_importance_dataset():
         json.dump(anlysis_data, f)
 
 #**************************************************************************************
+
+def video_keep_given_frames(video, frame_cluster_idxs):
+    new_video = torch.zeros_like(video)
+    for idx in range(len(frame_cluster_idxs)):
+        new_video[:,idx,:] = video[:,frame_cluster_idxs[idx],:]
+        print(f'Frame {idx} taken from original frame {frame_cluster_idxs[idx]}')
+    return new_video
 
 def create_frame_cluster_idxs(idx_list, len_array=16):
     idx_list.sort()
@@ -126,9 +167,7 @@ def create_frame_cluster_idxs(idx_list, len_array=16):
 
 
 if __name__ == '__main__':
-    cluster_array = create_frame_cluster_idxs([0,4,9, 12, 15])
-    print(cluster_array)
-    pass
+    motion_importance_dataset()
 
 
 
