@@ -106,6 +106,11 @@ def motion_importance_dataset():
                 pred_cls_ = torch.argmax(pred_,dim=1)
                 logit = pred_[:,gt_class].item()
 
+                percent_change_ = (pred_logit - logit)/pred_logit
+                if percent_change_ <= change_threshold:
+                    #check if the motion among the frames are important for this prediction
+                    pass
+
                 pass
 
 
