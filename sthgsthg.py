@@ -1,0 +1,1 @@
+https://huggingface.co/MCG-NJU/videomae-base-finetuned-ssv2
