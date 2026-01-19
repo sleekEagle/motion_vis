@@ -94,6 +94,7 @@ def motion_importance_dataset():
         percent_change = ret['percent_change']
         max_logit = ret['max_frame_logit']
         gt_class = class_labels[gt_class_name]
+        
         if percent_change > change_threshold:
             sorted_indices = [i for i, _ in sorted(enumerate(all_logits), key=lambda x: x[1], reverse=True)]
             for i in range(2, len(sorted_indices)):
