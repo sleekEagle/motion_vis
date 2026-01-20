@@ -94,7 +94,7 @@ def motion_importance_dataset():
         percent_change = ret['percent_change']
         max_logit = ret['max_frame_logit']
         gt_class = class_labels[gt_class_name]
-        
+
         if percent_change > change_threshold:
             sorted_indices = [i for i, _ in sorted(enumerate(all_logits), key=lambda x: x[1], reverse=True)]
             for i in range(2, len(sorted_indices)):
@@ -172,8 +172,62 @@ def create_frame_cluster_idxs(idx_list, len_array=16):
     return new_array
 
 
+def find_all_solutions(original_array, numbers, forbidden_pairs):
+    n = len(original_array)
+    skip_indices = [i for i, val in enumerate(original_array) if val is not None]
+    valid_indices = [i for i in range(n) if i not in skip_indices]
+    valid_indices.sort()
+    result = original_array.copy()
+    used = set()
+    all_solutions = []  # Store ALL solutions here
+    
+    # Convert forbidden_pairs to set for O(1) lookup
+    forbidden_set = set(forbidden_pairs)
+    
+    def backtrack(pos):
+        if pos == len(valid_indices):
+            all_solutions.append(result.copy())  # Save solution
+            return
+        ind = valid_indices[pos]
+        
+        for num in numbers:
+            if num in used:
+                continue
+            
+            # Check constraints
+            valid = True
+            if ind==0:
+                if (num, result[ind+1]) in forbidden_set:
+                    valid = False
+            elif ind<valid_indices[-1]:
+                if (result[ind-1], num) in forbidden_set or (num, result[ind+1]) in forbidden_set:
+                    valid = False
+            else:  # ind == valid_indices[-1]
+                if (result[ind-1], num) in forbidden_set:
+                    valid = False
+
+            if valid:
+                result[ind] = num
+                used.add(num)
+                
+                backtrack(pos + 1)  # Always continue searching
+                
+                # Backtrack
+                result[ind] = None
+                used.remove(num)
+    
+    backtrack(0)
+    return all_solutions  # Returns list of ALL valid solutions
+
+
 if __name__ == '__main__':
-    motion_importance_dataset()
+    # motion_importance_dataset()
+    numbers = {1, 2, 3, 7, 5, 8}
+    original_array = [None, None, 4, 6, None, None, None, None]
+    forbidden = [(2, 3), (4, 1), (6, 2), (8, 1)]
+    solution = find_all_solutions(original_array, numbers, forbidden)
+    pass
+
 
 
 
