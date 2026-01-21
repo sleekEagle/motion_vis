@@ -173,6 +173,11 @@ def create_frame_cluster_idxs(idx_list, len_array=16):
 
 
 def find_all_solutions(original_array, numbers, forbidden_pairs):
+    #check inputs for validity
+    orig_num = [n for n in original_array if n is not None]
+    assert len([n for n in orig_num if n in numbers])==0, "Error. Original array contains numbers that are in the given number set."
+    assert len(original_array) == len(orig_num)+len(numbers), "Error. The number of None entries in original_array must be equal to the number of given numbers + numer of non None elements in the origincal array"
+
     n = len(original_array)
     skip_indices = [i for i, val in enumerate(original_array) if val is not None]
     valid_indices = [i for i in range(n) if i not in skip_indices]
@@ -197,7 +202,7 @@ def find_all_solutions(original_array, numbers, forbidden_pairs):
             # Check constraints
             valid = True
             if ind==0:
-                if (num, result[ind+1]) in forbidden_set:
+                if (num, result[1]) in forbidden_set:
                     valid = False
             elif ind<valid_indices[-1]:
                 if (result[ind-1], num) in forbidden_set or (num, result[ind+1]) in forbidden_set:
@@ -222,10 +227,17 @@ def find_all_solutions(original_array, numbers, forbidden_pairs):
 
 if __name__ == '__main__':
     # motion_importance_dataset()
-    numbers = {1, 2, 3, 7, 5, 8}
-    original_array = [None, None, 4, 6, None, None, None, None]
-    forbidden = [(2, 3), (4, 1), (6, 2), (8, 1)]
+    numbers = {1, 2, 3, 7, 5}
+    original_array = [None, 4, None, None, None, 6, None]
+    forbidden = [(2, 3), (4, 1), (6, 2), (4,5)]
     solution = find_all_solutions(original_array, numbers, forbidden)
+    for s in solution:
+        for i in range(len(s)-1):
+            pair = (s[i], s[i+1])
+            assert pair not in forbidden, f"Forbidden pair {pair} found in solution {s}"
+        assert len(s) == len(original_array), f"Solution length {len(s)} does not match original array length {len(original_array)}"
+    print('checked')
+
     pass
 
 
