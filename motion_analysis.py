@@ -224,19 +224,38 @@ def find_all_solutions(original_array, numbers, forbidden_pairs):
     backtrack(0)
     return all_solutions  # Returns list of ALL valid solutions
 
+def get_motion_pairs(ids):
+    ids = np.array(ids)
+    diffs = np.abs(np.diff(ids))
+
+    start_idx = np.argwhere(diffs>0)
+
+    pairs = []
+    for idx in start_idx:
+        pairs.append((ids[idx].item(), ids[idx+1].item()))
+
+    return pairs
+
 
 if __name__ == '__main__':
     # motion_importance_dataset()
-    numbers = {1, 2, 3, 7, 5}
-    original_array = [None, 4, None, None, None, 6, None]
-    forbidden = [(2, 3), (4, 1), (6, 2), (4,5)]
-    solution = find_all_solutions(original_array, numbers, forbidden)
-    for s in solution:
-        for i in range(len(s)-1):
-            pair = (s[i], s[i+1])
-            assert pair not in forbidden, f"Forbidden pair {pair} found in solution {s}"
-        assert len(s) == len(original_array), f"Solution length {len(s)} does not match original array length {len(original_array)}"
-    print('checked')
+    # numbers = {1, 2, 3, 7, 5}
+    # original_array = [None, 4, None, None, None, 6, None]
+    # forbidden = [(2, 3), (4, 1), (6, 2), (4,5)]
+    # solution = find_all_solutions(original_array, numbers, forbidden)
+    # for s in solution:
+    #     for i in range(len(s)-1):
+    #         pair = (s[i], s[i+1])
+    #         assert pair not in forbidden, f"Forbidden pair {pair} found in solution {s}"
+    #     assert len(s) == len(original_array), f"Solution length {len(s)} does not match original array length {len(original_array)}"
+    # print('checked')
+
+    # ids = [2,2,2,2,8,8,8,3,3,3,3,9,7,7,7,10,10,10,10,23,45]
+    # pairs = get_motion_pairs(ids)
+    # print(pairs)
+
+
+
 
     pass
 
