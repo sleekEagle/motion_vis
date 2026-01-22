@@ -77,6 +77,9 @@ def motion_importance(video):
 
     return ret
 
+MAX_VID = 10
+import random
+
 def motion_importance_dataset():
     output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance.json')
     change_threshold = 0.05
@@ -110,6 +113,45 @@ def motion_importance_dataset():
                 percent_change_ = (pred_logit - logit)/pred_logit
                 if percent_change_ <= change_threshold:
                     #check if the motion among the frames are important for this prediction
+                    pairs = get_motion_pairs(clustered_ids)
+                    uniqueval_indices = get_uniqueval_indices(clustered_ids)
+                    vals = list(uniqueval_indices.keys())
+                    vals.sort()
+
+                    for pair in pairs:
+                        vals_ = vals.copy()
+                        nan_idx = [i for i, v in enumerate(vals_) if v not in pair]
+                        for i in nan_idx:
+                            vals_[i] = None
+                        numbers = [c for c in vals if c not in vals_]
+                        pairs_ = [p for p in pairs if p != pair]
+                        solutions = find_all_solutions(vals_, numbers, pairs_)
+                        #create video with the solutions
+                        k = min(MAX_VID,len(solutions))
+                        sample_sols = random.sample(solutions, k)
+                        for sol in sample_sols:
+                            v = torch.empty_like(video)
+                            cur_idx=0
+                            for s in sol:
+                                s_len = len(uniqueval_indices[s])
+                                v[:,cur_idx:cur_idx+s_len,:] = video[:,s].unsqueeze(1)
+                                cur_idx += s_len
+                            #evaluate the prediction for this create new video
+                            pass
+                                
+                                
+
+
+
+
+
+                        
+
+
+                        
+
+
+
                     pass
 
                 pass
@@ -236,6 +278,14 @@ def get_motion_pairs(ids):
 
     return pairs
 
+def get_uniqueval_indices(ids):
+    unique_ids = np.unique(np.array(ids))
+    args = [np.argwhere(ids==id) for id in unique_ids]
+    cluster_ids = {}
+    for i, id in enumerate(unique_ids):
+        cluster_ids[id.item()] = [int(i) for i in args[i][:,0]]
+    return cluster_ids
+
 
 if __name__ == '__main__':
     # motion_importance_dataset()
@@ -250,9 +300,36 @@ if __name__ == '__main__':
     #     assert len(s) == len(original_array), f"Solution length {len(s)} does not match original array length {len(original_array)}"
     # print('checked')
 
-    # ids = [2,2,2,2,8,8,8,3,3,3,3,9,7,7,7,10,10,10,10,23,45]
+    # ids = [2,2,2,2,5,5,5,7,7,7,7,9,9,10,12,13,13,13]
     # pairs = get_motion_pairs(ids)
+
+    # clusters = []
+    # for p in pairs:
+    #     clusters.append(p[0])
+    # clusters.append(pairs[-1][1])
+
     # print(pairs)
+
+    # uniqueval_indices = get_uniqueval_indices(ids)
+
+    # original_array = [None,None,7,9,None,None,None]
+    # numbers = [c for c in clusters if c not in original_array]
+    # pairs = [p for p in pairs if p != (7,9)]
+
+
+    # solution = find_all_solutions(original_array, numbers, pairs)
+
+    # for s in solution:
+    #     for i in range(len(s)-1):
+    #         pair = (s[i], s[i+1])
+    #         assert pair not in pairs, f"Forbidden pair {pair} found in solution {s}"
+    #     assert len(s) == len(original_array), f"Solution length {len(s)} does not match original array length {len(original_array)}"
+
+
+    motion_importance_dataset()
+
+
+
 
 
 
