@@ -32,10 +32,11 @@ model.to('cuda')
 model.eval()
 inference_loader = ucf101dm.inference_loader
 class_names = ucf101dm.inference_class_names
+
 class_labels = {}
 for k in class_names.keys():
     cls_name = class_names[k]
-    class_labels[cls_name] = k
+    class_labels[cls_name.lower()] = k
 
 '''
 replace the whole video with just one frame repeated
@@ -94,13 +95,20 @@ def motion_importance_dataset():
         video = inputs[0].to('cuda')
         gt_class_name = targets[0][0].split('_')[1]
         file_name = targets[0][0]
+        # if file_name != 'v_ApplyEyeMakeup_g03_c01':
+        #     continue
         seq = targets[0][1]
         ret = motion_importance(video.unsqueeze(0))
         pred_logit = ret['pred_original_logit']
+        pred_class = ret['pred_original_class']
+
+        if pred_class.lower() != gt_class_name.lower(): # we are only interested in correctly predicted examples
+            continue
+
         all_logits = ret['all_logits']
         percent_change = ret['percent_change']
         max_logit = ret['max_frame_logit']
-        gt_class = class_labels[gt_class_name]
+        gt_class = class_labels[gt_class_name.lower()]
         seq = ','.join([str(s) for s in seq])
         ret['seq'] = seq
         ret['gt_class'] = gt_class_name 
@@ -113,16 +121,27 @@ def motion_importance_dataset():
             file_analysis['sorted_importance_frame_idx'] = sorted_indices
 
             for i in range(2, len(sorted_indices)):
-                valuable_indices = sorted_indices[0:i]
+                valuable_indices = sorted_indices[0:i+1]
                 clustered_ids = create_frame_cluster_idxs(valuable_indices)
                 #update the video with only the valuable frames
                 video_ = video_keep_given_frames(video, clustered_ids)
+
+                # (video != video_)
+
+
+                # pred = model(video.unsqueeze(0))
+                # pred = F.softmax(pred, dim=1)
+                # pred_cls = torch.argmax(pred,dim=1)
+
+
+
                 pred_ = model(video_.unsqueeze(0))
                 pred_ = F.softmax(pred_,dim=1)
                 pred_cls_ = torch.argmax(pred_,dim=1)
                 logit = pred_[:,gt_class].item()
 
                 percent_change_ = (pred_logit - logit)/pred_logit
+
                 if percent_change_ <= change_threshold: #the video can be explained well (enough) just with the given set of frames
                     pair_analysis = {}
                     pair_analysis['new_logit'] = logit
@@ -194,11 +213,9 @@ def motion_importance_dataset():
     print(f'Overall accuracy: {accuracy:.3f}')
     anlysis_data['accuracy'] = accuracy
 
-    pass
-
     # vid_path = ucf101dm.construct_vid_path('ApplyLipstick', 1, 1)
-    # with open(output_path, "w") as f:
-    #     json.dump(anlysis_data, f)
+    with open(output_path, "w") as f:
+        json.dump(anlysis_data, f)
 
 #**************************************************************************************
 
@@ -319,47 +336,39 @@ def get_uniqueval_indices(ids):
     return cluster_ids
 
 
+import json
+def analyze_motion_imporance():
+    path = r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance.json'
+    with open(path, 'r', encoding='utf-8') as file:
+        data = json.load(file)
+
+    for idx, batch in enumerate(inference_loader):
+        print(f'{idx/len(inference_loader)*100:.0f} % is done.', end='\r')
+
+        inputs, targets = batch
+        video = inputs[0].to('cuda')
+        gt_file_name = targets[0][0]
+        d = data[gt_file_name]
+
+        #is there just one frame that can explain the whole video ?
+        sfs = d['single_frame_structure']
+        if sfs:
+            continue
+        else: # no
+            pair_imp = d['pair_analysis']['pair_importance']
+            if len(pair_imp)==1 and pair_imp[0][0]==[None,None]: #motion does not matter at all for the prediction
+                pass
+            else:
+                print('motion is important for this video!!')
+
+            
+
+
+
+
 if __name__ == '__main__':
-    # motion_importance_dataset()
-    # numbers = {1, 2, 3, 7, 5}
-    # original_array = [None, 4, None, None, None, 6, None]
-    # forbidden = [(2, 3), (4, 1), (6, 2), (4,5)]
-    # solution = find_all_solutions(original_array, numbers, forbidden)
-    # for s in solution:
-    #     for i in range(len(s)-1):
-    #         pair = (s[i], s[i+1])
-    #         assert pair not in forbidden, f"Forbidden pair {pair} found in solution {s}"
-    #     assert len(s) == len(original_array), f"Solution length {len(s)} does not match original array length {len(original_array)}"
-    # print('checked')
-
-    # ids = [2,2,2,2,5,5,5,7,7,7,7,9,9,10,12,13,13,13]
-    # pairs = get_motion_pairs(ids)
-
-    # clusters = []
-    # for p in pairs:
-    #     clusters.append(p[0])
-    # clusters.append(pairs[-1][1])
-
-    # print(pairs)
-
-    # uniqueval_indices = get_uniqueval_indices(ids)
-
-    # original_array = [None,None,7,9,None,None,None]
-    # numbers = [c for c in clusters if c not in original_array]
-    # pairs = [p for p in pairs if p != (7,9)]
-
-
-    # solution = find_all_solutions(original_array, numbers, pairs)
-
-    # for s in solution:
-    #     for i in range(len(s)-1):
-    #         pair = (s[i], s[i+1])
-    #         assert pair not in pairs, f"Forbidden pair {pair} found in solution {s}"
-    #     assert len(s) == len(original_array), f"Solution length {len(s)} does not match original array length {len(original_array)}"
-
-
     motion_importance_dataset()
-
+    # analyze_motion_imporance()
 
 
 
