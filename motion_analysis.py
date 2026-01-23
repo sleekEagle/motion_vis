@@ -79,6 +79,7 @@ def motion_importance(video):
 
 MAX_VID = 10
 import random
+import json
 
 def motion_importance_dataset():
     output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance.json')
@@ -86,10 +87,13 @@ def motion_importance_dataset():
     anlysis_data = {}
     n_samples, n_correct = 0, 0
     for idx, batch in enumerate(inference_loader):
+        file_analysis = {}
+        
         print(f'{idx/len(inference_loader)*100:.0f} % is done.', end='\r')
         inputs, targets = batch
         video = inputs[0].to('cuda')
         gt_class_name = targets[0][0].split('_')[1]
+        file_name = targets[0][0]
         seq = targets[0][1]
         ret = motion_importance(video.unsqueeze(0))
         pred_logit = ret['pred_original_logit']
@@ -97,9 +101,17 @@ def motion_importance_dataset():
         percent_change = ret['percent_change']
         max_logit = ret['max_frame_logit']
         gt_class = class_labels[gt_class_name]
+        seq = ','.join([str(s) for s in seq])
+        ret['seq'] = seq
+        ret['gt_class'] = gt_class_name 
 
-        if percent_change > change_threshold:
+        file_analysis['motion_importance'] = ret
+
+        if percent_change > change_threshold: #there is no single frame that can exaplain the whole video
+            file_analysis['single_frame_structure'] = False
             sorted_indices = [i for i, _ in sorted(enumerate(all_logits), key=lambda x: x[1], reverse=True)]
+            file_analysis['sorted_importance_frame_idx'] = sorted_indices
+
             for i in range(2, len(sorted_indices)):
                 valuable_indices = sorted_indices[0:i]
                 clustered_ids = create_frame_cluster_idxs(valuable_indices)
@@ -111,13 +123,20 @@ def motion_importance_dataset():
                 logit = pred_[:,gt_class].item()
 
                 percent_change_ = (pred_logit - logit)/pred_logit
-                if percent_change_ <= change_threshold:
+                if percent_change_ <= change_threshold: #the video can be explained well (enough) just with the given set of frames
+                    pair_analysis = {}
+                    pair_analysis['new_logit'] = logit
+                    pair_analysis['percent_change_'] = percent_change_
+
                     #check if the motion among the frames are important for this prediction
                     pairs = get_motion_pairs(clustered_ids)
+                    pairs.insert(0,(None,None))
                     uniqueval_indices = get_uniqueval_indices(clustered_ids)
                     vals = list(uniqueval_indices.keys())
                     vals.sort()
 
+
+                    pair_imp = []
                     for pair in pairs:
                         vals_ = vals.copy()
                         nan_idx = [i for i, v in enumerate(vals_) if v not in pair]
@@ -126,9 +145,12 @@ def motion_importance_dataset():
                         numbers = [c for c in vals if c not in vals_]
                         pairs_ = [p for p in pairs if p != pair]
                         solutions = find_all_solutions(vals_, numbers, pairs_)
+
                         #create video with the solutions
                         k = min(MAX_VID,len(solutions))
                         sample_sols = random.sample(solutions, k)
+
+                        sol_vids = torch.empty(0).to(video.device)
                         for sol in sample_sols:
                             v = torch.empty_like(video)
                             cur_idx=0
@@ -137,55 +159,46 @@ def motion_importance_dataset():
                                 v[:,cur_idx:cur_idx+s_len,:] = video[:,s].unsqueeze(1)
                                 cur_idx += s_len
                             #evaluate the prediction for this create new video
-                            pass
-                                
-                                
+                            sol_vids = torch.concatenate([sol_vids,v.unsqueeze(0)])
 
+                        pred_sol = model(sol_vids).mean(dim=0)
+                        pred_sol = F.softmax(pred_sol.unsqueeze(0),dim=1)
+                        logit_sol = pred_sol[:,gt_class].item()
+                        per_change_sol = (pred_logit-logit_sol)/pred_logit
+                        # print(f'pair: {pair}, logit: {logit_sol}')
+                        pair_imp.append((pair, per_change_sol))
 
+                        #if the model does not look at the motion between frames
+                        if pair == (None,None) and per_change_sol<=change_threshold:
+                            # print('Model does not care about motion')
+                            break
+                    pair_analysis['pair_importance'] = pair_imp
+                    file_analysis['pair_analysis'] = pair_analysis
 
-
+                    #break if the first solution is found s.t. percent_change_ <= change_threshold
+                    break
+        else: # there is atleas a single frame that can explain the video classificaiton
+            file_analysis['single_frame_structure'] = True
 
                         
-
-
-                        
-
-
-
-                    pass
-
-                pass
-
-
-
-
-            pass
-
-
-
-
-
-
-
-
-
-
-        seq = ','.join([str(s) for s in seq])
-        ret['seq'] = seq
-        ret['gt_class'] = gt_class_name 
-        anlysis_data[idx] = ret
         #is the prediction correct
         pred = ret['pred_original_class']
+        file_analysis['pred_original_class'] = ret['pred_original_class']
+        anlysis_data[file_name] = file_analysis
+
         if pred == gt_class_name:
             n_correct += 1
         n_samples += 1
+
     accuracy = n_correct / n_samples
     print(f'Overall accuracy: {accuracy:.3f}')
     anlysis_data['accuracy'] = accuracy
 
+    pass
+
     # vid_path = ucf101dm.construct_vid_path('ApplyLipstick', 1, 1)
-    with open(output_path, "w") as f:
-        json.dump(anlysis_data, f)
+    # with open(output_path, "w") as f:
+    #     json.dump(anlysis_data, f)
 
 #**************************************************************************************
 
@@ -193,7 +206,7 @@ def video_keep_given_frames(video, frame_cluster_idxs):
     new_video = torch.zeros_like(video)
     for idx in range(len(frame_cluster_idxs)):
         new_video[:,idx,:] = video[:,frame_cluster_idxs[idx],:]
-        print(f'Frame {idx} taken from original frame {frame_cluster_idxs[idx]}')
+        # print(f'Frame {idx} taken from original frame {frame_cluster_idxs[idx]}')
     return new_video
 
 def create_frame_cluster_idxs(idx_list, len_array=16):
@@ -225,9 +238,24 @@ def find_all_solutions(original_array, numbers, forbidden_pairs):
     valid_indices = [i for i in range(n) if i not in skip_indices]
     valid_indices.sort()
     result = original_array.copy()
+
+    #handle special cases seperately
+    if len(original_array)==3 and len(skip_indices)==2:
+        if valid_indices[0]==2:
+            if (original_array[1],numbers[0]) in forbidden_pairs:
+                ret_array = [numbers[0],original_array[0],original_array[1]]
+            else:
+                ret_array = [original_array[0],original_array[1],numbers[0]]
+        if valid_indices[0]==0:
+            if (numbers[0],original_array[1]) in forbidden_pairs:
+                ret_array = [original_array[1],original_array[2],numbers[0]]
+            else:
+                ret_array = [numbers[0],original_array[1],original_array[2]]
+        return [ret_array]
+
     used = set()
     all_solutions = []  # Store ALL solutions here
-    
+
     # Convert forbidden_pairs to set for O(1) lookup
     forbidden_set = set(forbidden_pairs)
     
@@ -235,6 +263,10 @@ def find_all_solutions(original_array, numbers, forbidden_pairs):
         if pos == len(valid_indices):
             all_solutions.append(result.copy())  # Save solution
             return
+        
+        if len(all_solutions)>1000:
+            return
+        
         ind = valid_indices[pos]
         
         for num in numbers:
