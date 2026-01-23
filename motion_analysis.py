@@ -348,18 +348,21 @@ def analyze_motion_imporance():
         inputs, targets = batch
         video = inputs[0].to('cuda')
         gt_file_name = targets[0][0]
-        d = data[gt_file_name]
+        if gt_file_name in data: # if this sample is in the data. i.e if the prediction for this class is correct
+            d = data[gt_file_name]
 
-        #is there just one frame that can explain the whole video ?
-        sfs = d['single_frame_structure']
-        if sfs:
-            continue
-        else: # no
-            pair_imp = d['pair_analysis']['pair_importance']
-            if len(pair_imp)==1 and pair_imp[0][0]==[None,None]: #motion does not matter at all for the prediction
-                pass
-            else:
-                print('motion is important for this video!!')
+            #is there just one frame that can explain the whole video ?
+            sfs = d['single_frame_structure']
+            if sfs:
+                continue
+            else: # no
+                pair_imp = d['pair_analysis']['pair_importance']
+                if len(pair_imp)==1 and pair_imp[0][0]==[None,None]: #motion does not matter at all for the prediction
+                    pass
+                else:
+                    print('motion is important for this video!!')
+                    pair_imp[4]
+
 
             
 
@@ -367,8 +370,8 @@ def analyze_motion_imporance():
 
 
 if __name__ == '__main__':
-    motion_importance_dataset()
-    # analyze_motion_imporance()
+    # motion_importance_dataset()
+    analyze_motion_imporance()
 
 
 
