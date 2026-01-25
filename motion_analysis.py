@@ -199,6 +199,69 @@ def motion_importance_dataset():
         else: # there is atleas a single frame that can explain the video classificaiton
             file_analysis['single_frame_structure'] = True
 
+        #is there just one frame that can explain the whole video ?
+        sfs = file_analysis['single_frame_structure']
+        if sfs:
+            continue
+        else: # no
+            pair_imp = file_analysis['pair_analysis']['pair_importance']
+            if len(pair_imp)==1 and pair_imp[0][0]==(None,None): #motion does not matter at all for the prediction
+                pass
+            else:
+                pair_imp = [p for p in pair_imp if p[0][0]!=None]
+                print('motion is important for this video!!')
+                #lets find which motions are important
+                sort_idx = np.argsort(np.array([-1*val[1] for val in pair_imp]))
+                f = []
+                for v in [val[0] for val in pair_imp if None not in val[0]]:
+                    f.append(v[0])
+                    f.append(v[1])
+                f = np.unique(np.array(f))
+
+                new_cluster_ids = uniqueval_indices.copy()
+                for s in range(0,len(sort_idx)-1):
+                    #create video with given two motions unchanged
+                    # solutions = find_all_solutions(vals_, numbers, pairs_)
+                    pair1 = pair_imp[int(sort_idx[s])][0]
+                    pair2 = pair_imp[int(sort_idx[s+1])][0]
+                    vals_ = [None]*len(f)
+                    
+                    #are the two pairs adjecent?
+                    if pair1[1]==pair2[0] or pair2[1]==pair1[0]: # yes
+                        f_ = [int(i) for i in np.unique(np.array([pair1[0],pair1[1],pair2[0],pair2[1]]))]
+                        sel_frames = []
+                        for fval in f_:
+                            sel_frames.extend(new_cluster_ids[fval])
+                            del new_cluster_ids[fval]
+                        new_cluster_ids[max(vals)+1] = sel_frames
+                    else:
+                        max_val = max(vals)+1
+                        for p in [pair1,pair2]:
+                            sel_frames = []
+                            sel_frames.extend(new_cluster_ids[p[0]])
+                            sel_frames.extend(new_cluster_ids[p[1]])
+                            sel_frames.sort()
+                            del new_cluster_ids[p[0]] 
+                            del new_cluster_ids[p[1]]
+                            new_cluster_ids[max_val] = sel_frames
+                            max_val += 1
+                    pass
+
+
+
+
+
+
+
+
+
+                    
+
+
+
+
+        
+
                         
         #is the prediction correct
         pred = ret['pred_original_class']
@@ -370,8 +433,8 @@ def analyze_motion_imporance():
 
 
 if __name__ == '__main__':
-    # motion_importance_dataset()
-    analyze_motion_imporance()
+    motion_importance_dataset()
+    # analyze_motion_imporance()
 
 
 
