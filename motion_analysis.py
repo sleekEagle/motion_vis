@@ -211,6 +211,29 @@ def motion_importance_dataset():
                 uniqueval_indices = get_uniqueval_indices(clustered_ids)
                 new_cluster_ids = uniqueval_indices.copy()
 
+                last_cluster_id = -1
+                new_key = max(new_cluster_ids.keys())
+                for s in sort_idx:
+                    pair = pair_imp[s][0]
+                    sel_frames = []
+                    sel_frames.extend(uniqueval_indices[pair[0]])
+                    sel_frames.extend(uniqueval_indices[pair[1]])
+                    sel_frames.sort()
+                    if pair[0] in new_cluster_ids.keys():
+                        del new_cluster_ids[pair[0]] 
+                    if pair[1] in new_cluster_ids.keys():
+                        del new_cluster_ids[pair[1]]
+                    new_key += 1
+                    new_cluster_ids[new_key] = sel_frames
+
+                    if last_cluster_id!=-1: # combine last two clusters if they are adjecent
+                        if (min(new_cluster_ids[last_cluster_id]) == max(new_cluster_ids[new_key])+1) or (max(new_cluster_ids[last_cluster_id])+1 == min(new_cluster_ids[new_key])):
+                            pass
+                        
+                    last_cluster_id = new_key
+
+                        
+
                 for s in range(0,len(sort_idx)-1):
                     #create video with given two motions unchanged
                     # solutions = find_all_solutions(vals_, numbers, pairs_)
@@ -237,6 +260,11 @@ def motion_importance_dataset():
                             new_key = max(new_cluster_ids.keys())+1
                             new_cluster_ids[new_key] = sel_frames
                     pass
+                    #create clustered_ids array
+                    # clustered_ids_new = np.zeros_like(clustered_ids)
+
+
+
 
 
 
@@ -419,13 +447,85 @@ def analyze_motion_imporance():
 
 
             
-
+def print_clus_ids(c):
+    for k in c.keys():
+        print(f'{k} : {c[k]}')
 
 
 
 if __name__ == '__main__':
-    motion_importance_dataset()
+    # motion_importance_dataset()
     # analyze_motion_imporance()
+    pairs = [(6,7),(3,4),(5,6),(4,5)]
+    clustered_ids = {
+        '3' : [0,1,2,3],
+        '4': [4],
+        '5': [5],
+        '6': [6],
+        '7': [7,8,9,10,11,12,13,14,15]
+    }
+    new_clustered_ids = {}
+    for k in clustered_ids.keys():
+        d_ = {
+            'frame_idx': clustered_ids[k],
+            'frames': [int(k)]*len(clustered_ids[k])
+        }
+        new_clustered_ids[int(k)] = d_
+
+    mod_clustered_ids = new_clustered_ids.copy()
+    # print_clus_ids(new_clustered_ids)
+    # print_clus_ids(mod_clustered_ids)
+
+
+    
+    def get_frame_key(clus_ids, getkey):
+        for k in clus_ids.keys():
+            f = clus_ids[k]['frames']
+            if f[0] == getkey or f[-1] == getkey:
+                return k
+        return -1
+    print_clus_ids(new_clustered_ids)
+    for pair in pairs:
+        k1 = get_frame_key(mod_clustered_ids, pair[0])
+        k2 = get_frame_key(mod_clustered_ids, pair[1])
+    
+        f_idx1 = mod_clustered_ids[k1]['frame_idx']
+        f1 = mod_clustered_ids[k1]['frames']
+        f_idx2 = mod_clustered_ids[k2]['frame_idx']
+        f2 = mod_clustered_ids[k2]['frames']
+        f_idx = f_idx1+f_idx2
+        f = f1+f2
+        d = {
+            'frame_idx': f_idx,
+            'frames': f
+        }
+
+
+        new_key = max(mod_clustered_ids.keys())+1
+        
+        if k1 in mod_clustered_ids : del mod_clustered_ids[k1]
+        if k2 in mod_clustered_ids : del mod_clustered_ids[k2]
+
+        mod_clustered_ids[new_key] = d
+
+        #combine clusters if they are overlapping
+        pass
+
+        print('******************************')
+        # print_clus_ids(new_clustered_ids)
+        # print('____________________________________________')
+        print(f'new key: {new_key}')
+        print_clus_ids(mod_clustered_ids)
+        print('******************************')
+
+
+
+
+
+
+        pass
+        
+
 
 
 
