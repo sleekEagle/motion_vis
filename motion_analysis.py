@@ -160,8 +160,8 @@ def motion_importance_dataset():
                     pair_imp = []
                     for pair in pairs:
                         vals_ = vals.copy()
-                        nan_idx = [i for i, v in enumerate(vals_) if v not in pair]
-                        for i in nan_idx:
+                        not_nan_idx = [i for i, v in enumerate(vals_) if v not in pair]
+                        for i in not_nan_idx:
                             vals_[i] = None
                         fill_numbers = [c for c in vals if c not in vals_]
                         fobbiden_pairs_ = [p for p in pairs if p != pair]
@@ -186,9 +186,7 @@ def motion_importance_dataset():
 
         #is there just one frame that can explain the whole video ?
         sfs = file_analysis['single_frame_structure']
-        if sfs:
-            continue
-        else: # no
+        if not sfs: # no
             pair_imp = file_analysis['pair_analysis']['pair_importance']
             if len(pair_imp)==1 and pair_imp[0][0]==(None,None): #motion does not matter at all for the prediction
                 pass
