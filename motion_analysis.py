@@ -87,11 +87,11 @@ per_change_sol: percentage of change of the predicted logit of gt_class
 lower -> better prediction
 '''
 def pair_importance(video, gt_class, pred_logit, change_threshold, clustered_ids):
-    uniqueval_indices = get_uniqueval_indices(clustered_ids)
+    # uniqueval_indices = get_uniqueval_indices(clustered_ids)
     pairs = get_motion_pairs(clustered_ids)
     pairs.insert(0,(None,None))
-    vals = list(uniqueval_indices.keys())
-    vals.sort()
+    # vals = list(uniqueval_indices.keys())
+    # vals.sort()
 
     pair_imp = []
     for pair in pairs:
@@ -416,19 +416,17 @@ def find_all_solutions(original_array, numbers, forbidden_pairs):
     return all_solutions  # Returns list of ALL valid solutions
 
 def get_motion_pairs(ids):
-    ids = np.array(ids)
-    diffs = np.abs(np.diff(ids))
-
-    start_idx = np.argwhere(diffs>0)
-
+    #sort according to frame indices
+    ids = dict(sorted(ids.items(), key=lambda x:x[1][0]))
     pairs = []
-    for idx in start_idx:
-        pairs.append((ids[idx].item(), ids[idx+1].item()))
+    keys = list(ids.keys())
+    for idx in range(len(keys)-1):
+        pairs.append((keys[idx], keys[idx+1]))
 
     return pairs
 
 def get_uniqueval_indices(ids):
-    unique_ids = np.unique(np.array(ids))
+    unique_ids = np.unique(list(ids.keys()))
     args = [np.argwhere(ids==id) for id in unique_ids]
     cluster_ids = {}
     for i, id in enumerate(unique_ids):
