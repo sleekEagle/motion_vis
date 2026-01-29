@@ -227,14 +227,13 @@ def motion_importance_dataset():
                         avg_pred = get_avg_pred(video, clustered_ids, combinations)
                         comb_logit = avg_pred[:,gt_class].item()
                         comb_per_change = (pred_logit-comb_logit)/pred_logit
-                        pair_imp.append((pair, comb_per_change))
+                        if comb_per_change<change_threshold:
+                            pair_imp.append((pair, comb_per_change))
 
                         #if the model does not look at the motion between frames
                         if pair == (None,None) and comb_per_change<=change_threshold:
                             # print('Model does not care about motion')
                             break
-
-
 
                     pair_analysis['pair_importance'] = pair_imp
                     file_analysis['pair_analysis'] = pair_analysis
@@ -254,62 +253,69 @@ def motion_importance_dataset():
                 pass
             else: #motion is important for this video
                 pair_imp = [p for p in pair_imp if p[0][0]!=None]
-                #lets find which motions are important
-                sort_idx = np.argsort(np.array([val[1] for val in pair_imp]))
-                uniqueval_indices = get_uniqueval_indices(clustered_ids)
-                new_cluster_ids = uniqueval_indices.copy()
-
-                last_cluster_id = -1
-                new_key = max(new_cluster_ids.keys())
-                for s in sort_idx:
-                    pair = pair_imp[s][0]
-                    sel_frames = []
-                    sel_frames.extend(uniqueval_indices[pair[0]])
-                    sel_frames.extend(uniqueval_indices[pair[1]])
-                    sel_frames.sort()
-                    if pair[0] in new_cluster_ids.keys():
-                        del new_cluster_ids[pair[0]] 
-                    if pair[1] in new_cluster_ids.keys():
-                        del new_cluster_ids[pair[1]]
-                    new_key += 1
-                    new_cluster_ids[new_key] = sel_frames
-
-                    if last_cluster_id!=-1: # combine last two clusters if they are adjecent
-                        if (min(new_cluster_ids[last_cluster_id]) == max(new_cluster_ids[new_key])+1) or (max(new_cluster_ids[last_cluster_id])+1 == min(new_cluster_ids[new_key])):
-                            pass
-                        
-                    last_cluster_id = new_key
-
-                        
-
-                for s in range(0,len(sort_idx)-1):
-                    #create video with given two motions unchanged
-                    # solutions = find_all_solutions(vals_, numbers, pairs_)
-                    pair1 = pair_imp[int(sort_idx[s])][0]
-                    pair2 = pair_imp[int(sort_idx[s+1])][0]
-                    
-                    #are the two pairs adjecent?
-                    if pair1[1]==pair2[0] or pair2[1]==pair1[0]: # yes
-                        f_ = [int(i) for i in np.unique(np.array([pair1[0],pair1[1],pair2[0],pair2[1]]))]
-                        sel_frames = []
-                        for fval in f_:
-                            sel_frames.extend(new_cluster_ids[fval])
-                            del new_cluster_ids[fval]
-                        new_key = max(new_cluster_ids.keys())+1
-                        new_cluster_ids[new_key] = sel_frames
-                    else:
-                        for p in [pair1,pair2]:
-                            sel_frames = []
-                            sel_frames.extend(new_cluster_ids[p[0]])
-                            sel_frames.extend(new_cluster_ids[p[1]])
-                            sel_frames.sort()
-                            del new_cluster_ids[p[0]] 
-                            del new_cluster_ids[p[1]]
-                            new_key = max(new_cluster_ids.keys())+1
-                            new_cluster_ids[new_key] = sel_frames
+                if len(pair_imp)>=2:
                     pass
-                    #create clustered_ids array
-                    # clustered_ids_new = np.zeros_like(clustered_ids)
+
+                # for p in pair_imp if p[1]<change_threshold
+                # pair_imp = sorted(pair_imp,key=lambda x:x[1])
+
+
+                # #lets find which motions are important
+                # sort_idx = np.argsort(np.array([val[1] for val in pair_imp]))
+                # uniqueval_indices = get_uniqueval_indices(clustered_ids)
+                # new_cluster_ids = uniqueval_indices.copy()
+
+                # last_cluster_id = -1
+                # new_key = max(new_cluster_ids.keys())
+                # for s in sort_idx:
+                #     pair = pair_imp[s][0]
+                #     sel_frames = []
+                #     sel_frames.extend(uniqueval_indices[pair[0]])
+                #     sel_frames.extend(uniqueval_indices[pair[1]])
+                #     sel_frames.sort()
+                #     if pair[0] in new_cluster_ids.keys():
+                #         del new_cluster_ids[pair[0]] 
+                #     if pair[1] in new_cluster_ids.keys():
+                #         del new_cluster_ids[pair[1]]
+                #     new_key += 1
+                #     new_cluster_ids[new_key] = sel_frames
+
+                #     if last_cluster_id!=-1: # combine last two clusters if they are adjecent
+                #         if (min(new_cluster_ids[last_cluster_id]) == max(new_cluster_ids[new_key])+1) or (max(new_cluster_ids[last_cluster_id])+1 == min(new_cluster_ids[new_key])):
+                #             pass
+                        
+                #     last_cluster_id = new_key
+
+                        
+
+                # for s in range(0,len(sort_idx)-1):
+                #     #create video with given two motions unchanged
+                #     # solutions = find_all_solutions(vals_, numbers, pairs_)
+                #     pair1 = pair_imp[int(sort_idx[s])][0]
+                #     pair2 = pair_imp[int(sort_idx[s+1])][0]
+                    
+                #     #are the two pairs adjecent?
+                #     if pair1[1]==pair2[0] or pair2[1]==pair1[0]: # yes
+                #         f_ = [int(i) for i in np.unique(np.array([pair1[0],pair1[1],pair2[0],pair2[1]]))]
+                #         sel_frames = []
+                #         for fval in f_:
+                #             sel_frames.extend(new_cluster_ids[fval])
+                #             del new_cluster_ids[fval]
+                #         new_key = max(new_cluster_ids.keys())+1
+                #         new_cluster_ids[new_key] = sel_frames
+                #     else:
+                #         for p in [pair1,pair2]:
+                #             sel_frames = []
+                #             sel_frames.extend(new_cluster_ids[p[0]])
+                #             sel_frames.extend(new_cluster_ids[p[1]])
+                #             sel_frames.sort()
+                #             del new_cluster_ids[p[0]] 
+                #             del new_cluster_ids[p[1]]
+                #             new_key = max(new_cluster_ids.keys())+1
+                #             new_cluster_ids[new_key] = sel_frames
+                #     pass
+                #     #create clustered_ids array
+                #     # clustered_ids_new = np.zeros_like(clustered_ids)
 
 
 
@@ -507,94 +513,73 @@ def print_clus_ids(c):
 if __name__ == '__main__':
     motion_importance_dataset()
     # analyze_motion_imporance()
-    pairs = [(2,3),(10,16),(5,6),(4,5),(6,10)]
-    clustered_ids = {
-        '2' : [0,1,2],
-        '3' : [3],
-        '4': [4],
-        '5': [5],
-        '6': [6,7,8,9],
-        '10': [10,11,12,13,14,15],
-        '16': [16,17,18] 
-    }
-    new_clustered_ids = {}
-    for k in clustered_ids.keys():
-        d_ = {
-            'frame_idx': clustered_ids[k],
-            'frames': [int(k)]*len(clustered_ids[k])
-        }
-        new_clustered_ids[int(k)] = d_
+    # pairs = [(2,3),(10,16),(5,6),(4,5),(6,10)]
+    # clustered_ids = {
+    #     '2' : [0,1,2],
+    #     '3' : [3],
+    #     '4': [4],
+    #     '5': [5],
+    #     '6': [6,7,8,9],
+    #     '10': [10,11,12,13,14,15],
+    #     '16': [16,17,18] 
+    # }
+    # new_clustered_ids = {}
+    # for k in clustered_ids.keys():
+    #     d_ = {
+    #         'frame_idx': clustered_ids[k],
+    #         'frames': [int(k)]*len(clustered_ids[k])
+    #     }
+    #     new_clustered_ids[int(k)] = d_
 
-    mod_clustered_ids = new_clustered_ids.copy()
+    # mod_clustered_ids = new_clustered_ids.copy()
+    # # print_clus_ids(new_clustered_ids)
+    # # print_clus_ids(mod_clustered_ids)
+
+
+    
+    # def get_frame_key(clus_ids, getkey):
+    #     for k in clus_ids.keys():
+    #         f = clus_ids[k]['frames']
+    #         if f[0] == getkey or f[-1] == getkey:
+    #             return k
+    #     return -1
     # print_clus_ids(new_clustered_ids)
-    # print_clus_ids(mod_clustered_ids)
-
-
+    # for pair in pairs:
+    #     k1 = get_frame_key(mod_clustered_ids, pair[0])
+    #     k2 = get_frame_key(mod_clustered_ids, pair[1])
     
-    def get_frame_key(clus_ids, getkey):
-        for k in clus_ids.keys():
-            f = clus_ids[k]['frames']
-            if f[0] == getkey or f[-1] == getkey:
-                return k
-        return -1
-    print_clus_ids(new_clustered_ids)
-    for pair in pairs:
-        k1 = get_frame_key(mod_clustered_ids, pair[0])
-        k2 = get_frame_key(mod_clustered_ids, pair[1])
-    
-        f_idx1 = mod_clustered_ids[k1]['frame_idx']
-        f1 = mod_clustered_ids[k1]['frames']
-        f_idx2 = mod_clustered_ids[k2]['frame_idx']
-        f2 = mod_clustered_ids[k2]['frames']
-        f_idx = f_idx1+f_idx2
-        f = f1+f2
-        d = {
-            'frame_idx': f_idx,
-            'frames': f
-        }
+    #     f_idx1 = mod_clustered_ids[k1]['frame_idx']
+    #     f1 = mod_clustered_ids[k1]['frames']
+    #     f_idx2 = mod_clustered_ids[k2]['frame_idx']
+    #     f2 = mod_clustered_ids[k2]['frames']
+    #     f_idx = f_idx1+f_idx2
+    #     f = f1+f2
+    #     d = {
+    #         'frame_idx': f_idx,
+    #         'frames': f
+    #     }
 
 
-        new_key = max(mod_clustered_ids.keys())+1
+    #     new_key = max(mod_clustered_ids.keys())+1
 
-        if k1 in mod_clustered_ids : del mod_clustered_ids[k1]
-        if k2 in mod_clustered_ids : del mod_clustered_ids[k2]
+    #     if k1 in mod_clustered_ids : del mod_clustered_ids[k1]
+    #     if k2 in mod_clustered_ids : del mod_clustered_ids[k2]
 
-        mod_clustered_ids[new_key] = d
+    #     mod_clustered_ids[new_key] = d
 
-        print('******************************')
-        # print_clus_ids(new_clustered_ids)
-        # print('____________________________________________')
-        print(f'new key: {new_key}')
-        print_clus_ids(mod_clustered_ids)
-        print('******************************')
+    #     print('******************************')
+    #     # print_clus_ids(new_clustered_ids)
+    #     # print('____________________________________________')
+    #     print(f'new key: {new_key}')
+    #     print_clus_ids(mod_clustered_ids)
+    #     print('******************************')
 
-        # solutions = find_all_solutions(vals_, numbers, pairs_)
-        sort_dict = {}
-        for k in mod_clustered_ids:
-            f = mod_clustered_ids[k]['frames'][0]
-            sort_dict[k] = f
-        sorted_keys = sorted(sort_dict, key=sort_dict.get)
-
-
-
-
-
-
-
-
-
-
-
-        pass
-        
-
-
-
-
-
-
-
-    pass
+    #     # solutions = find_all_solutions(vals_, numbers, pairs_)
+    #     sort_dict = {}
+    #     for k in mod_clustered_ids:
+    #         f = mod_clustered_ids[k]['frames'][0]
+    #         sort_dict[k] = f
+    #     sorted_keys = sorted(sort_dict, key=sort_dict.get)
 
 
 
