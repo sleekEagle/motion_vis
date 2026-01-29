@@ -130,23 +130,18 @@ lower -> better prediction
 #             break
 #     return pair_imp
 
-def avg_pred(video, clustered_ids, combinations):
+def get_avg_pred(video, clustered_ids, combinations):
     #create video with the solutions
-    k = min(MAX_VID,len(combinations))
-    sol_vids = torch.empty(0).to(video.device)
-    for sol in combinations:
-        pass
-        # v = torch.empty_like(video)
-        # cur_idx=0
-        # for s in sol:
-        #     s_len = len(uniqueval_indices[s])
-        #     v[:,cur_idx:cur_idx+s_len,:] = video[:,s].unsqueeze(1)
-        #     cur_idx += s_len
-        #evaluate the prediction for this create new video
-#         sol_vids = torch.concatenate([sol_vids,v.unsqueeze(0)])
+    comb_vids = torch.empty(0).to(video.device)
+    for comb in combinations:
+        comb_vid = create_new_video(video, comb, clustered_ids)
+        comb_vids = torch.concatenate([comb_vids,comb_vid.unsqueeze(0)])
 
-#     pred_sol = model(sol_vids).mean(dim=0)
-#     pred_sol = F.softmax(pred_sol.unsqueeze(0),dim=1)
+    pred_comb = model(comb_vids).mean(dim=0)
+    pred_comb = F.softmax(pred_comb.unsqueeze(0),dim=1)
+
+    return pred_comb
+
 #     logit_sol = pred_sol[:,gt_class].item()
 #     per_change_sol = (pred_logit-logit_sol)/pred_logit
 #     pair_imp.append((pair, per_change_sol))
@@ -217,6 +212,7 @@ def motion_importance_dataset():
                     #check if the motion among the frames are important for this prediction
                     clustered_ids = dict(sorted(clustered_ids.items(), key=lambda x:x[1][0]))
                     pairs = get_motion_pairs(clustered_ids)
+                    pairs.insert(0,(None,None))
                     vals = list(clustered_ids.keys())
 
                     pair_imp = []
@@ -228,7 +224,16 @@ def motion_importance_dataset():
                         fill_numbers = [c for c in vals if c not in vals_]
                         fobbiden_pairs_ = [p for p in pairs if p != pair]
                         combinations = find_all_solutions(vals_, fill_numbers, fobbiden_pairs_)
-                        pair_imp = avg_pred(video, clustered_ids, combinations)
+                        avg_pred = get_avg_pred(video, clustered_ids, combinations)
+                        comb_logit = avg_pred[:,gt_class].item()
+                        comb_per_change = (pred_logit-comb_logit)/pred_logit
+                        pair_imp.append((pair, comb_per_change))
+
+                        #if the model does not look at the motion between frames
+                        if pair == (None,None) and comb_per_change<=change_threshold:
+                            # print('Model does not care about motion')
+                            break
+
 
 
                     pair_analysis['pair_importance'] = pair_imp
@@ -376,7 +381,7 @@ def create_frame_cluster_idxs(idx_list, len_array=16):
     return d
 
 
-def find_all_solutions(original_array, numbers, forbidden_pairs):
+def find_all_solutions(original_array, numbers, forbidden_pairs, MAX_SOLS=10):
     #check inputs for validity
     orig_num = [n for n in original_array if n is not None]
     assert len([n for n in orig_num if n in numbers])==0, "Error. Original array contains numbers that are in the given number set."
@@ -413,7 +418,7 @@ def find_all_solutions(original_array, numbers, forbidden_pairs):
             all_solutions.append(result.copy())  # Save solution
             return
         
-        if len(all_solutions)>1000:
+        if len(all_solutions)>MAX_SOLS:
             return
         
         ind = valid_indices[pos]
