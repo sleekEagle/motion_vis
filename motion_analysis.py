@@ -86,49 +86,76 @@ import json
 per_change_sol: percentage of change of the predicted logit of gt_class
 lower -> better prediction
 '''
-def pair_importance(video, gt_class, pred_logit, change_threshold, clustered_ids):
-    # uniqueval_indices = get_uniqueval_indices(clustered_ids)
-    pairs = get_motion_pairs(clustered_ids)
-    pairs.insert(0,(None,None))
-    # vals = list(uniqueval_indices.keys())
-    # vals.sort()
+# def pair_importance(video, gt_class, pred_logit, change_threshold, clustered_ids):
+#     # uniqueval_indices = get_uniqueval_indices(clustered_ids)
+#     pairs = get_motion_pairs(clustered_ids)
+#     pairs.insert(0,(None,None))
+#     # vals = list(uniqueval_indices.keys())
+#     # vals.sort()
 
-    pair_imp = []
-    for pair in pairs:
-        vals_ = vals.copy()
-        nan_idx = [i for i, v in enumerate(vals_) if v not in pair]
-        for i in nan_idx:
-            vals_[i] = None
-        numbers = [c for c in vals if c not in vals_]
-        pairs_ = [p for p in pairs if p != pair]
-        solutions = find_all_solutions(vals_, numbers, pairs_)
+#     pair_imp = []
+#     for pair in pairs:
+#         vals_ = vals.copy()
+#         nan_idx = [i for i, v in enumerate(vals_) if v not in pair]
+#         for i in nan_idx:
+#             vals_[i] = None
+#         numbers = [c for c in vals if c not in vals_]
+#         pairs_ = [p for p in pairs if p != pair]
+#         solutions = find_all_solutions(vals_, numbers, pairs_)
 
-        #create video with the solutions
-        k = min(MAX_VID,len(solutions))
-        sample_sols = random.sample(solutions, k)
+#         #create video with the solutions
+#         k = min(MAX_VID,len(solutions))
+#         sample_sols = random.sample(solutions, k)
 
-        sol_vids = torch.empty(0).to(video.device)
-        for sol in sample_sols:
-            v = torch.empty_like(video)
-            cur_idx=0
-            for s in sol:
-                s_len = len(uniqueval_indices[s])
-                v[:,cur_idx:cur_idx+s_len,:] = video[:,s].unsqueeze(1)
-                cur_idx += s_len
-            #evaluate the prediction for this create new video
-            sol_vids = torch.concatenate([sol_vids,v.unsqueeze(0)])
+#         sol_vids = torch.empty(0).to(video.device)
+#         for sol in sample_sols:
+#             v = torch.empty_like(video)
+#             cur_idx=0
+#             for s in sol:
+#                 s_len = len(uniqueval_indices[s])
+#                 v[:,cur_idx:cur_idx+s_len,:] = video[:,s].unsqueeze(1)
+#                 cur_idx += s_len
+#             #evaluate the prediction for this create new video
+#             sol_vids = torch.concatenate([sol_vids,v.unsqueeze(0)])
 
-        pred_sol = model(sol_vids).mean(dim=0)
-        pred_sol = F.softmax(pred_sol.unsqueeze(0),dim=1)
-        logit_sol = pred_sol[:,gt_class].item()
-        per_change_sol = (pred_logit-logit_sol)/pred_logit
-        pair_imp.append((pair, per_change_sol))
+#         pred_sol = model(sol_vids).mean(dim=0)
+#         pred_sol = F.softmax(pred_sol.unsqueeze(0),dim=1)
+#         logit_sol = pred_sol[:,gt_class].item()
+#         per_change_sol = (pred_logit-logit_sol)/pred_logit
+#         pair_imp.append((pair, per_change_sol))
 
-        #if the model does not look at the motion between frames
-        if pair == (None,None) and per_change_sol<=change_threshold:
-            # print('Model does not care about motion')
-            break
-    return pair_imp
+#         #if the model does not look at the motion between frames
+#         if pair == (None,None) and per_change_sol<=change_threshold:
+#             # print('Model does not care about motion')
+#             break
+#     return pair_imp
+
+def avg_pred(video, clustered_ids, combinations):
+    #create video with the solutions
+    k = min(MAX_VID,len(combinations))
+    sol_vids = torch.empty(0).to(video.device)
+    for sol in combinations:
+        pass
+        # v = torch.empty_like(video)
+        # cur_idx=0
+        # for s in sol:
+        #     s_len = len(uniqueval_indices[s])
+        #     v[:,cur_idx:cur_idx+s_len,:] = video[:,s].unsqueeze(1)
+        #     cur_idx += s_len
+        #evaluate the prediction for this create new video
+#         sol_vids = torch.concatenate([sol_vids,v.unsqueeze(0)])
+
+#     pred_sol = model(sol_vids).mean(dim=0)
+#     pred_sol = F.softmax(pred_sol.unsqueeze(0),dim=1)
+#     logit_sol = pred_sol[:,gt_class].item()
+#     per_change_sol = (pred_logit-logit_sol)/pred_logit
+#     pair_imp.append((pair, per_change_sol))
+
+#     #if the model does not look at the motion between frames
+#     if pair == (None,None) and per_change_sol<=change_threshold:
+#         # print('Model does not care about motion')
+#         break
+# return pair_imp
 
 def motion_importance_dataset():
     output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance.json')
@@ -172,7 +199,8 @@ def motion_importance_dataset():
                 valuable_indices = sorted_indices[0:i]
                 clustered_ids = create_frame_cluster_idxs(valuable_indices)
                 #update the video with only the valuable frames
-                video_ = video_keep_given_frames(video, clustered_ids)
+                ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
+                video_ = create_new_video(video, ordered_keys, clustered_ids)
 
                 pred_ = model(video_.unsqueeze(0))
                 pred_ = F.softmax(pred_,dim=1)
@@ -187,7 +215,22 @@ def motion_importance_dataset():
                     pair_analysis['percent_change_'] = percent_change_
 
                     #check if the motion among the frames are important for this prediction
-                    pair_imp = pair_importance(video, gt_class, pred_logit, change_threshold, clustered_ids)
+                    clustered_ids = dict(sorted(clustered_ids.items(), key=lambda x:x[1][0]))
+                    pairs = get_motion_pairs(clustered_ids)
+                    vals = list(clustered_ids.keys())
+
+                    pair_imp = []
+                    for pair in pairs:
+                        vals_ = vals.copy()
+                        nan_idx = [i for i, v in enumerate(vals_) if v not in pair]
+                        for i in nan_idx:
+                            vals_[i] = None
+                        fill_numbers = [c for c in vals if c not in vals_]
+                        fobbiden_pairs_ = [p for p in pairs if p != pair]
+                        combinations = find_all_solutions(vals_, fill_numbers, fobbiden_pairs_)
+                        pair_imp = avg_pred(video, clustered_ids, combinations)
+
+
                     pair_analysis['pair_importance'] = pair_imp
                     file_analysis['pair_analysis'] = pair_analysis
 
@@ -301,22 +344,11 @@ def motion_importance_dataset():
 
 #**************************************************************************************
 
-def video_keep_given_frames(video, frame_cluster_idxs):
-    #sort the cluster id dict
-    frame_cluster_idxs = dict(sorted(frame_cluster_idxs.items(), key=lambda x: x[1][0]))
-    
-    # frame_cluster_idxs = {
-    #     10: [6,6,6,6,6,6,6],
-    #     1: [7],
-    #     4: [10,10,10],
-    #     8: [14,14,14,14],
-    #     9: [15]
-    # }
-
+def create_new_video(video, ordered_keys, frame_cluster_idxs):
     new_video = torch.zeros_like(video)
 
     cur_idx=0
-    for k in frame_cluster_idxs:
+    for k in ordered_keys:
         for f in frame_cluster_idxs[k]:
             new_video[:,cur_idx,:] = video[:,f,:]
             cur_idx += 1
@@ -416,8 +448,6 @@ def find_all_solutions(original_array, numbers, forbidden_pairs):
     return all_solutions  # Returns list of ALL valid solutions
 
 def get_motion_pairs(ids):
-    #sort according to frame indices
-    ids = dict(sorted(ids.items(), key=lambda x:x[1][0]))
     pairs = []
     keys = list(ids.keys())
     for idx in range(len(keys)-1):
