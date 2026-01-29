@@ -169,7 +169,7 @@ def motion_importance_dataset():
             file_analysis['sorted_importance_frame_idx'] = sorted_indices
 
             for i in range(2, len(sorted_indices)):
-                valuable_indices = sorted_indices[0:i+1]
+                valuable_indices = sorted_indices[0:i]
                 clustered_ids = create_frame_cluster_idxs(valuable_indices)
                 #update the video with only the valuable frames
                 video_ = video_keep_given_frames(video, clustered_ids)
@@ -302,28 +302,46 @@ def motion_importance_dataset():
 #**************************************************************************************
 
 def video_keep_given_frames(video, frame_cluster_idxs):
+    #sort the cluster id dict
+    frame_cluster_idxs = dict(sorted(frame_cluster_idxs.items(), key=lambda x: x[1][0]))
+    
+    # frame_cluster_idxs = {
+    #     10: [6,6,6,6,6,6,6],
+    #     1: [7],
+    #     4: [10,10,10],
+    #     8: [14,14,14,14],
+    #     9: [15]
+    # }
+
     new_video = torch.zeros_like(video)
-    for idx in range(len(frame_cluster_idxs)):
-        new_video[:,idx,:] = video[:,frame_cluster_idxs[idx],:]
-        # print(f'Frame {idx} taken from original frame {frame_cluster_idxs[idx]}')
+
+    cur_idx=0
+    for k in frame_cluster_idxs:
+        for f in frame_cluster_idxs[k]:
+            new_video[:,cur_idx,:] = video[:,f,:]
+            cur_idx += 1
+
+    # (new_video[:,15,:] == video[:,15,:]).all()
+
     return new_video
 
 def create_frame_cluster_idxs(idx_list, len_array=16):
-    idx_list.sort()
-    new_array = np.zeros((len_array,), dtype=int)
-
     assert len(idx_list) > 0 , "idx_list must contain at least one index."
+    max_idx = max(idx_list)
+    assert max_idx < len_array, "max value in idx_list must not be larger than len_array"
 
+    idx_list.sort()
+    d = {}
     if len(idx_list) == 1:
-        new_array[:] = idx_list[0]
-        return new_array
+        d[idx_list[0]] = [idx_list[0]]*len_array
+        return d
 
-    new_array[0:idx_list[1]] = idx_list[0]
-    for idx in range(1, len(idx_list)-1):
-        new_array[idx_list[idx]:idx_list[idx+1]] = idx_list[idx]
-    new_array[idx_list[-1]:] = idx_list[-1]
+    d[idx_list[0]] = [idx_list[0]]*(idx_list[1])
+    for i in range(1, len(idx_list)-1):
+        d[idx_list[i]] = [idx_list[i]]*(idx_list[i+1]-idx_list[i])
+    d[idx_list[-1]] = [idx_list[-1]]*(len_array - idx_list[-1])
     
-    return new_array
+    return d
 
 
 def find_all_solutions(original_array, numbers, forbidden_pairs):
@@ -454,15 +472,17 @@ def print_clus_ids(c):
 
 
 if __name__ == '__main__':
-    # motion_importance_dataset()
+    motion_importance_dataset()
     # analyze_motion_imporance()
-    pairs = [(6,7),(3,4),(5,6),(4,5)]
+    pairs = [(2,3),(10,16),(5,6),(4,5),(6,10)]
     clustered_ids = {
-        '3' : [0,1,2,3],
+        '2' : [0,1,2],
+        '3' : [3],
         '4': [4],
         '5': [5],
-        '6': [6],
-        '7': [7,8,9,10,11,12,13,14,15]
+        '6': [6,7,8,9],
+        '10': [10,11,12,13,14,15],
+        '16': [16,17,18] 
     }
     new_clustered_ids = {}
     for k in clustered_ids.keys():
@@ -502,14 +522,11 @@ if __name__ == '__main__':
 
 
         new_key = max(mod_clustered_ids.keys())+1
-        
+
         if k1 in mod_clustered_ids : del mod_clustered_ids[k1]
         if k2 in mod_clustered_ids : del mod_clustered_ids[k2]
 
         mod_clustered_ids[new_key] = d
-
-        #combine clusters if they are overlapping
-        pass
 
         print('******************************')
         # print_clus_ids(new_clustered_ids)
@@ -517,6 +534,18 @@ if __name__ == '__main__':
         print(f'new key: {new_key}')
         print_clus_ids(mod_clustered_ids)
         print('******************************')
+
+        # solutions = find_all_solutions(vals_, numbers, pairs_)
+        sort_dict = {}
+        for k in mod_clustered_ids:
+            f = mod_clustered_ids[k]['frames'][0]
+            sort_dict[k] = f
+        sorted_keys = sorted(sort_dict, key=sort_dict.get)
+
+
+
+
+
 
 
 
