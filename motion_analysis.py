@@ -82,54 +82,6 @@ MAX_VID = 10
 import random
 import json
 
-'''
-per_change_sol: percentage of change of the predicted logit of gt_class
-lower -> better prediction
-'''
-# def pair_importance(video, gt_class, pred_logit, change_threshold, clustered_ids):
-#     # uniqueval_indices = get_uniqueval_indices(clustered_ids)
-#     pairs = get_motion_pairs(clustered_ids)
-#     pairs.insert(0,(None,None))
-#     # vals = list(uniqueval_indices.keys())
-#     # vals.sort()
-
-#     pair_imp = []
-#     for pair in pairs:
-#         vals_ = vals.copy()
-#         nan_idx = [i for i, v in enumerate(vals_) if v not in pair]
-#         for i in nan_idx:
-#             vals_[i] = None
-#         numbers = [c for c in vals if c not in vals_]
-#         pairs_ = [p for p in pairs if p != pair]
-#         solutions = find_all_solutions(vals_, numbers, pairs_)
-
-#         #create video with the solutions
-#         k = min(MAX_VID,len(solutions))
-#         sample_sols = random.sample(solutions, k)
-
-#         sol_vids = torch.empty(0).to(video.device)
-#         for sol in sample_sols:
-#             v = torch.empty_like(video)
-#             cur_idx=0
-#             for s in sol:
-#                 s_len = len(uniqueval_indices[s])
-#                 v[:,cur_idx:cur_idx+s_len,:] = video[:,s].unsqueeze(1)
-#                 cur_idx += s_len
-#             #evaluate the prediction for this create new video
-#             sol_vids = torch.concatenate([sol_vids,v.unsqueeze(0)])
-
-#         pred_sol = model(sol_vids).mean(dim=0)
-#         pred_sol = F.softmax(pred_sol.unsqueeze(0),dim=1)
-#         logit_sol = pred_sol[:,gt_class].item()
-#         per_change_sol = (pred_logit-logit_sol)/pred_logit
-#         pair_imp.append((pair, per_change_sol))
-
-#         #if the model does not look at the motion between frames
-#         if pair == (None,None) and per_change_sol<=change_threshold:
-#             # print('Model does not care about motion')
-#             break
-#     return pair_imp
-
 def get_avg_pred(video, clustered_ids, combinations):
     #create video with the solutions
     comb_vids = torch.empty(0).to(video.device)
@@ -141,16 +93,6 @@ def get_avg_pred(video, clustered_ids, combinations):
     pred_comb = F.softmax(pred_comb.unsqueeze(0),dim=1)
 
     return pred_comb
-
-#     logit_sol = pred_sol[:,gt_class].item()
-#     per_change_sol = (pred_logit-logit_sol)/pred_logit
-#     pair_imp.append((pair, per_change_sol))
-
-#     #if the model does not look at the motion between frames
-#     if pair == (None,None) and per_change_sol<=change_threshold:
-#         # print('Model does not care about motion')
-#         break
-# return pair_imp
 
 def motion_importance_dataset():
     output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance.json')
@@ -232,7 +174,6 @@ def motion_importance_dataset():
 
                         #if the model does not look at the motion between frames
                         if pair == (None,None) and comb_per_change<=change_threshold:
-                            # print('Model does not care about motion')
                             break
 
                     pair_analysis['pair_importance'] = pair_imp
@@ -256,86 +197,6 @@ def motion_importance_dataset():
                 if len(pair_imp)>=2:
                     pass
 
-                # for p in pair_imp if p[1]<change_threshold
-                # pair_imp = sorted(pair_imp,key=lambda x:x[1])
-
-
-                # #lets find which motions are important
-                # sort_idx = np.argsort(np.array([val[1] for val in pair_imp]))
-                # uniqueval_indices = get_uniqueval_indices(clustered_ids)
-                # new_cluster_ids = uniqueval_indices.copy()
-
-                # last_cluster_id = -1
-                # new_key = max(new_cluster_ids.keys())
-                # for s in sort_idx:
-                #     pair = pair_imp[s][0]
-                #     sel_frames = []
-                #     sel_frames.extend(uniqueval_indices[pair[0]])
-                #     sel_frames.extend(uniqueval_indices[pair[1]])
-                #     sel_frames.sort()
-                #     if pair[0] in new_cluster_ids.keys():
-                #         del new_cluster_ids[pair[0]] 
-                #     if pair[1] in new_cluster_ids.keys():
-                #         del new_cluster_ids[pair[1]]
-                #     new_key += 1
-                #     new_cluster_ids[new_key] = sel_frames
-
-                #     if last_cluster_id!=-1: # combine last two clusters if they are adjecent
-                #         if (min(new_cluster_ids[last_cluster_id]) == max(new_cluster_ids[new_key])+1) or (max(new_cluster_ids[last_cluster_id])+1 == min(new_cluster_ids[new_key])):
-                #             pass
-                        
-                #     last_cluster_id = new_key
-
-                        
-
-                # for s in range(0,len(sort_idx)-1):
-                #     #create video with given two motions unchanged
-                #     # solutions = find_all_solutions(vals_, numbers, pairs_)
-                #     pair1 = pair_imp[int(sort_idx[s])][0]
-                #     pair2 = pair_imp[int(sort_idx[s+1])][0]
-                    
-                #     #are the two pairs adjecent?
-                #     if pair1[1]==pair2[0] or pair2[1]==pair1[0]: # yes
-                #         f_ = [int(i) for i in np.unique(np.array([pair1[0],pair1[1],pair2[0],pair2[1]]))]
-                #         sel_frames = []
-                #         for fval in f_:
-                #             sel_frames.extend(new_cluster_ids[fval])
-                #             del new_cluster_ids[fval]
-                #         new_key = max(new_cluster_ids.keys())+1
-                #         new_cluster_ids[new_key] = sel_frames
-                #     else:
-                #         for p in [pair1,pair2]:
-                #             sel_frames = []
-                #             sel_frames.extend(new_cluster_ids[p[0]])
-                #             sel_frames.extend(new_cluster_ids[p[1]])
-                #             sel_frames.sort()
-                #             del new_cluster_ids[p[0]] 
-                #             del new_cluster_ids[p[1]]
-                #             new_key = max(new_cluster_ids.keys())+1
-                #             new_cluster_ids[new_key] = sel_frames
-                #     pass
-                #     #create clustered_ids array
-                #     # clustered_ids_new = np.zeros_like(clustered_ids)
-
-
-
-
-
-
-
-
-
-
-
-
-                    
-
-
-
-
-        
-
-                        
         #is the prediction correct
         pred = ret['pred_original_class']
         file_analysis['pred_original_class'] = ret['pred_original_class']
@@ -357,15 +218,11 @@ def motion_importance_dataset():
 
 def create_new_video(video, ordered_keys, frame_cluster_idxs):
     new_video = torch.zeros_like(video)
-
     cur_idx=0
     for k in ordered_keys:
         for f in frame_cluster_idxs[k]:
             new_video[:,cur_idx,:] = video[:,f,:]
             cur_idx += 1
-
-    # (new_video[:,15,:] == video[:,15,:]).all()
-
     return new_video
 
 def create_frame_cluster_idxs(idx_list, len_array=16):
@@ -512,74 +369,6 @@ def print_clus_ids(c):
 
 if __name__ == '__main__':
     motion_importance_dataset()
-    # analyze_motion_imporance()
-    # pairs = [(2,3),(10,16),(5,6),(4,5),(6,10)]
-    # clustered_ids = {
-    #     '2' : [0,1,2],
-    #     '3' : [3],
-    #     '4': [4],
-    #     '5': [5],
-    #     '6': [6,7,8,9],
-    #     '10': [10,11,12,13,14,15],
-    #     '16': [16,17,18] 
-    # }
-    # new_clustered_ids = {}
-    # for k in clustered_ids.keys():
-    #     d_ = {
-    #         'frame_idx': clustered_ids[k],
-    #         'frames': [int(k)]*len(clustered_ids[k])
-    #     }
-    #     new_clustered_ids[int(k)] = d_
-
-    # mod_clustered_ids = new_clustered_ids.copy()
-    # # print_clus_ids(new_clustered_ids)
-    # # print_clus_ids(mod_clustered_ids)
-
-
-    
-    # def get_frame_key(clus_ids, getkey):
-    #     for k in clus_ids.keys():
-    #         f = clus_ids[k]['frames']
-    #         if f[0] == getkey or f[-1] == getkey:
-    #             return k
-    #     return -1
-    # print_clus_ids(new_clustered_ids)
-    # for pair in pairs:
-    #     k1 = get_frame_key(mod_clustered_ids, pair[0])
-    #     k2 = get_frame_key(mod_clustered_ids, pair[1])
-    
-    #     f_idx1 = mod_clustered_ids[k1]['frame_idx']
-    #     f1 = mod_clustered_ids[k1]['frames']
-    #     f_idx2 = mod_clustered_ids[k2]['frame_idx']
-    #     f2 = mod_clustered_ids[k2]['frames']
-    #     f_idx = f_idx1+f_idx2
-    #     f = f1+f2
-    #     d = {
-    #         'frame_idx': f_idx,
-    #         'frames': f
-    #     }
-
-
-    #     new_key = max(mod_clustered_ids.keys())+1
-
-    #     if k1 in mod_clustered_ids : del mod_clustered_ids[k1]
-    #     if k2 in mod_clustered_ids : del mod_clustered_ids[k2]
-
-    #     mod_clustered_ids[new_key] = d
-
-    #     print('******************************')
-    #     # print_clus_ids(new_clustered_ids)
-    #     # print('____________________________________________')
-    #     print(f'new key: {new_key}')
-    #     print_clus_ids(mod_clustered_ids)
-    #     print('******************************')
-
-    #     # solutions = find_all_solutions(vals_, numbers, pairs_)
-    #     sort_dict = {}
-    #     for k in mod_clustered_ids:
-    #         f = mod_clustered_ids[k]['frames'][0]
-    #         sort_dict[k] = f
-    #     sorted_keys = sorted(sort_dict, key=sort_dict.get)
 
 
 
