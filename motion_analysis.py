@@ -227,9 +227,6 @@ def motion_importance_dataset():
         pred_logit = ret['pred_original_logit']
         pred_class = ret['pred_original_class']
 
-        if pred_class.lower() != gt_class_name.lower(): # we are only interested in correctly predicted examples
-            continue
-
         all_logits = ret['all_logits']
         lowest_perc_change = ret['lowest_perc_change']
         max_logit = ret['max_frame_logit']
@@ -308,6 +305,7 @@ def motion_importance_dataset():
 
         if pred_class.lower() == gt_class_name.lower():
             n_correct += 1
+            
         n_samples += 1
 
     accuracy = n_correct / n_samples
