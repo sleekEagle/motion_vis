@@ -65,14 +65,14 @@ def motion_importance(video):
     any_correct = any([p==pred_cls for p in preds])
 
     max_logit = max(logits)
-    perc_change = (logit_original - max_logit)/logit_original
+    lowest_perc_change = (logit_original - max_logit)/logit_original
 
     ret = {
         'pred_original_class': class_names[pred_cls],
         'pred_original_logit': logit_original,
         'all_logits': logits,
         'max_frame_logit': max_logit,
-        'percent_change': perc_change,
+        'lowest_perc_change': lowest_perc_change,
         'any_frame_correct': any_correct
     }
 
@@ -93,6 +93,119 @@ def get_avg_pred(video, clustered_ids, combinations):
     pred_comb = F.softmax(pred_comb.unsqueeze(0),dim=1)
 
     return pred_comb
+
+'''
+Monte-Carlo method to fill the array and avoid the forbidden pairs
+'''
+def sample_fill_array(
+    original,
+    numbers,
+    pairs_to_avoid,
+    max_solutions=10,
+    max_trials=10_000,
+    forbid_reverse=False,
+    seed=None,
+):
+    
+    orig_num = [n for n in original if n is not None]
+    assert len([n for n in orig_num if n in numbers])==0, "Error. Original array contains numbers that are in the given number set."
+    assert len(original) == len(orig_num)+len(numbers), "Error. The number of None entries in original_array must be equal to the number of given numbers + numer of non None elements in the origincal array"
+
+
+    if seed is not None:
+        random.seed(seed)
+
+    forbidden = set(pairs_to_avoid)
+    if forbid_reverse:
+        forbidden |= {(b, a) for (a, b) in pairs_to_avoid}
+
+    n = len(original)
+    fixed = original[:]
+    fixed_vals = {x for x in fixed if x is not None}
+    free_positions = [i for i, x in enumerate(fixed) if x is None]
+    available = [x for x in numbers if x not in fixed_vals]
+
+    #handle special cases seperately
+    skip_indices = [i for i, val in enumerate(original) if val is not None]
+    valid_indices = [i for i in range(n) if i not in skip_indices]
+    valid_indices.sort()
+    if len(original)==3 and len(fixed_vals)==2:
+        if valid_indices[0]==2:
+            if (original[1],numbers[0]) in pairs_to_avoid:
+                ret_array = [numbers[0],original[0],original[1]]
+            else:
+                ret_array = [original[0],original[1],numbers[0]]
+        if valid_indices[0]==0:
+            if (numbers[0],original[1]) in pairs_to_avoid:
+                ret_array = [original[1],original[2],numbers[0]]
+            else:
+                ret_array = [numbers[0],original[1],original[2]]
+        return [ret_array]
+
+
+    solutions = []
+    seen = set()
+
+    def is_valid(arr):
+        for i in range(n - 1):
+            if (arr[i], arr[i + 1]) in forbidden:
+                return False
+        return True
+
+    for _ in range(max_trials):
+        if len(solutions) >= max_solutions:
+            break
+
+        random.shuffle(available)
+        candidate = fixed[:]
+
+        for pos, val in zip(free_positions, available):
+            candidate[pos] = val
+
+        if not is_valid(candidate):
+            continue
+
+        key = tuple(candidate)
+        if key in seen:
+            continue
+
+        seen.add(key)
+        solutions.append(candidate)
+
+    return solutions
+
+
+'''
+usage:
+
+original = [None, None, 3, 4, None, None, None]
+numbers = [1, 2, 5, 10, 12]
+pairs_to_avoid = [(1,2), (2,5), (10,12)]
+
+solutions = sample_fill_array(
+    original,
+    numbers,
+    pairs_to_avoid,
+    max_solutions=5,
+    max_trials=5000
+)
+'''
+
+def get_motion_pairs(ids):
+    pairs = []
+    keys = list(ids.keys())
+    for idx in range(len(keys)-1):
+        pairs.append((keys[idx], keys[idx+1]))
+
+    return pairs
+
+def get_uniqueval_indices(ids):
+    unique_ids = np.unique(list(ids.keys()))
+    args = [np.argwhere(ids==id) for id in unique_ids]
+    cluster_ids = {}
+    for i, id in enumerate(unique_ids):
+        cluster_ids[id.item()] = [int(i) for i in args[i][:,0]]
+    return cluster_ids
 
 def motion_importance_dataset():
     output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance.json')
@@ -118,7 +231,7 @@ def motion_importance_dataset():
             continue
 
         all_logits = ret['all_logits']
-        percent_change = ret['percent_change']
+        lowest_perc_change = ret['lowest_perc_change']
         max_logit = ret['max_frame_logit']
         gt_class = class_labels[gt_class_name.lower()]
         seq = ','.join([str(s) for s in seq])
@@ -127,7 +240,7 @@ def motion_importance_dataset():
 
         file_analysis['motion_importance'] = ret
 
-        if percent_change > change_threshold: #there is no single frame that can exaplain the whole video
+        if lowest_perc_change > change_threshold: #there is no single frame that can exaplain the whole video
             file_analysis['single_frame_structure'] = False
             sorted_indices = [i for i, _ in sorted(enumerate(all_logits), key=lambda x: x[1], reverse=True)]
             file_analysis['sorted_importance_frame_idx'] = sorted_indices
@@ -165,16 +278,23 @@ def motion_importance_dataset():
                             vals_[i] = None
                         fill_numbers = [c for c in vals if c not in vals_]
                         fobbiden_pairs_ = [p for p in pairs if p != pair]
-                        combinations = find_all_solutions(vals_, fill_numbers, fobbiden_pairs_)
+                        combinations = sample_fill_array(vals_, fill_numbers, fobbiden_pairs_,
+                                        max_solutions=20,
+                                        max_trials=5000
+                                    )
+                        # check solutions to see if it has forbidden pairs
+                        # for comb in combinations:
+                        #     for i in range(len(comb)-1):
+                        #         pair = (comb[i],comb[i+1])
+                        #         if pair in fobbiden_pairs_:
+                        #             print('forbidden pair detected')
+                        #             break
+                        # print('check complete')
+
                         avg_pred = get_avg_pred(video, clustered_ids, combinations)
                         comb_logit = avg_pred[:,gt_class].item()
                         comb_per_change = (pred_logit-comb_logit)/pred_logit
-                        if comb_per_change<change_threshold:
-                            pair_imp.append((pair, comb_per_change))
-
-                        #if the model does not look at the motion between frames
-                        if pair == (None,None) and comb_per_change<=change_threshold:
-                            break
+                        pair_imp.append((pair, comb_per_change))
 
                     pair_analysis['pair_importance'] = pair_imp
                     file_analysis['pair_analysis'] = pair_analysis
@@ -184,23 +304,9 @@ def motion_importance_dataset():
         else: # there is atleas a single frame that can explain the video classificaiton
             file_analysis['single_frame_structure'] = True
 
-        #is there just one frame that can explain the whole video ?
-        sfs = file_analysis['single_frame_structure']
-        if not sfs: # no
-            pair_imp = file_analysis['pair_analysis']['pair_importance']
-            if len(pair_imp)==1 and pair_imp[0][0]==(None,None): #motion does not matter at all for the prediction
-                pass
-            else: #motion is important for this video
-                pair_imp = [p for p in pair_imp if p[0][0]!=None]
-                if len(pair_imp)>=2:
-                    pass
-
-        #is the prediction correct
-        pred = ret['pred_original_class']
-        file_analysis['pred_original_class'] = ret['pred_original_class']
         anlysis_data[file_name] = file_analysis
 
-        if pred == gt_class_name:
+        if pred_class.lower() == gt_class_name.lower():
             n_correct += 1
         n_samples += 1
 
@@ -242,94 +348,6 @@ def create_frame_cluster_idxs(idx_list, len_array=16):
     return d
 
 
-def find_all_solutions(original_array, numbers, forbidden_pairs, MAX_SOLS=10):
-    #check inputs for validity
-    orig_num = [n for n in original_array if n is not None]
-    assert len([n for n in orig_num if n in numbers])==0, "Error. Original array contains numbers that are in the given number set."
-    assert len(original_array) == len(orig_num)+len(numbers), "Error. The number of None entries in original_array must be equal to the number of given numbers + numer of non None elements in the origincal array"
-
-    n = len(original_array)
-    skip_indices = [i for i, val in enumerate(original_array) if val is not None]
-    valid_indices = [i for i in range(n) if i not in skip_indices]
-    valid_indices.sort()
-    result = original_array.copy()
-
-    #handle special cases seperately
-    if len(original_array)==3 and len(skip_indices)==2:
-        if valid_indices[0]==2:
-            if (original_array[1],numbers[0]) in forbidden_pairs:
-                ret_array = [numbers[0],original_array[0],original_array[1]]
-            else:
-                ret_array = [original_array[0],original_array[1],numbers[0]]
-        if valid_indices[0]==0:
-            if (numbers[0],original_array[1]) in forbidden_pairs:
-                ret_array = [original_array[1],original_array[2],numbers[0]]
-            else:
-                ret_array = [numbers[0],original_array[1],original_array[2]]
-        return [ret_array]
-
-    used = set()
-    all_solutions = []  # Store ALL solutions here
-
-    # Convert forbidden_pairs to set for O(1) lookup
-    forbidden_set = set(forbidden_pairs)
-    
-    def backtrack(pos):
-        if pos == len(valid_indices):
-            all_solutions.append(result.copy())  # Save solution
-            return
-        
-        if len(all_solutions)>MAX_SOLS:
-            return
-        
-        ind = valid_indices[pos]
-        
-        for num in numbers:
-            if num in used:
-                continue
-            
-            # Check constraints
-            valid = True
-            if ind==0:
-                if (num, result[1]) in forbidden_set:
-                    valid = False
-            elif ind<valid_indices[-1]:
-                if (result[ind-1], num) in forbidden_set or (num, result[ind+1]) in forbidden_set:
-                    valid = False
-            else:  # ind == valid_indices[-1]
-                if (result[ind-1], num) in forbidden_set:
-                    valid = False
-
-            if valid:
-                result[ind] = num
-                used.add(num)
-                
-                backtrack(pos + 1)  # Always continue searching
-                
-                # Backtrack
-                result[ind] = None
-                used.remove(num)
-    
-    backtrack(0)
-    return all_solutions  # Returns list of ALL valid solutions
-
-def get_motion_pairs(ids):
-    pairs = []
-    keys = list(ids.keys())
-    for idx in range(len(keys)-1):
-        pairs.append((keys[idx], keys[idx+1]))
-
-    return pairs
-
-def get_uniqueval_indices(ids):
-    unique_ids = np.unique(list(ids.keys()))
-    args = [np.argwhere(ids==id) for id in unique_ids]
-    cluster_ids = {}
-    for i, id in enumerate(unique_ids):
-        cluster_ids[id.item()] = [int(i) for i in args[i][:,0]]
-    return cluster_ids
-
-
 import json
 def analyze_motion_imporance():
     path = r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance.json'
@@ -362,7 +380,6 @@ def analyze_motion_imporance():
 def print_clus_ids(c):
     for k in c.keys():
         print(f'{k} : {c[k]}')
-
 
 
 if __name__ == '__main__':
