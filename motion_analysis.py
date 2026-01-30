@@ -305,13 +305,14 @@ def motion_importance_dataset():
 
         if pred_class.lower() == gt_class_name.lower():
             n_correct += 1
-            
+
         n_samples += 1
 
     accuracy = n_correct / n_samples
     print(f'Overall accuracy: {accuracy:.3f}')
     anlysis_data['accuracy'] = accuracy
-
+    anlysis_data['threshold'] = change_threshold
+    
     # vid_path = ucf101dm.construct_vid_path('ApplyLipstick', 1, 1)
     with open(output_path, "w") as f:
         json.dump(anlysis_data, f)
