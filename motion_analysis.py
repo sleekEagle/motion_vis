@@ -294,6 +294,7 @@ def motion_importance_dataset():
                         pair_imp.append((pair, comb_per_change))
 
                     pair_analysis['pair_importance'] = pair_imp
+                    pair_analysis['clustered_ids'] = clustered_ids
                     file_analysis['pair_analysis'] = pair_analysis
 
                     #break if the first solution is found s.t. percent_change_ <= change_threshold
