@@ -705,6 +705,12 @@ class UCF101_data_model:
             "C:\\Users\\lahir\\Downloads\\UCF101\\jpgs", cls_name, "v_{}_g{}_c{}".format(cls_name, str(g).zfill(2), str(c).zfill(2))
         )
         return dir
+    
+    def construct_vid_path_from_full(self, path):
+        dir = os.path.join(
+            "C:\\Users\\lahir\\Downloads\\UCF101\\jpgs", path
+        )
+        return dir
 
     def load_jpg_ucf101_param(self, l, g, c, n):
         name = self.inference_class_names[l]

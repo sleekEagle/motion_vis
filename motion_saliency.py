@@ -2,7 +2,6 @@ import func
 import json
 
 
-
 #create model and data loader
 ucf101dm = func.UCF101_data_model()
 model = ucf101dm.model
@@ -11,6 +10,11 @@ model.eval()
 inference_loader = ucf101dm.inference_loader
 class_names = ucf101dm.inference_class_names
 THR = 0.05
+
+gmodel = func.GradcamModel(model)
+
+def spacial_analysis(video, clustered_ids, frames):
+    pass
 
 
 if __name__ == '__main__':
@@ -42,7 +46,16 @@ if __name__ == '__main__':
                 if pair_importance[0][1] < THR:
                     print('Motion is not important for this video')
                     continue
-            pass
+            for i in range(1,len(pair_importance)):
+                pi = pair_importance[i]
+                g = k.split('_')[2][1:]
+                c = k.split('_')[3][1:]
+                cls_name = d['motion_importance']['gt_class']
+
+                vid_path = ucf101dm.construct_vid_path(cls_name,g,c)
+                video = ucf101dm.load_jpg_ucf101(vid_path,n=0)
+                spacial_analysis(video, clustered_ids, pi[0])
+                pass
 
 
 
@@ -54,4 +67,4 @@ if __name__ == '__main__':
 
 
 
-    gmodel = func.GradcamModel(model)
+    
