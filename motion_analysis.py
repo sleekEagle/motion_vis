@@ -242,7 +242,7 @@ def motion_importance_dataset():
             sorted_indices = [i for i, _ in sorted(enumerate(all_logits), key=lambda x: x[1], reverse=True)]
             file_analysis['sorted_importance_frame_idx'] = sorted_indices
 
-            for i in range(2, len(sorted_indices)):
+            for i in range(2, len(sorted_indices)+1):
                 valuable_indices = sorted_indices[0:i]
                 clustered_ids = create_frame_cluster_idxs(valuable_indices)
                 #update the video with only the valuable frames
