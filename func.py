@@ -496,7 +496,7 @@ class GradcamModel(nn.Module):
         # self.feature_tr = weights.transforms()
 
         self.model.layer4[2].conv3.register_forward_hook(self.save_activations)
-        self.model.layer4[2].conv3.register_backward_hook(self.save_gradients)
+        self.model.layer4[2].conv3.register_full_backward_hook(self.save_gradients)
 
         # add noise to input
         #noise parameters from https://github.com/pkmr06/pytorch-smoothgrad

@@ -1,5 +1,6 @@
 import func
 import json
+import torch
 
 
 #create model and data loader
@@ -12,13 +13,22 @@ class_names = ucf101dm.inference_class_names
 THR = 0.05
 
 gmodel = func.GradcamModel(model)
+gmodel.to('cuda')
 
 def spacial_analysis(video, clustered_ids, frames):
+    gmodel.zero_grad()
+    input = video.permute(1,0,2,3)[None,:]
+    input.requires_grad = True
+    input = input.to('cuda')
+    pred = gmodel(input)
+    pred_idx = torch.argmax(pred,dim=1)
+    pred[0,pred_idx].backward()
+    gcam = gmodel.calc_gradcam(input)
+
     pass
 
 
-if __name__ == '__main__':
-
+def go_through_samples():
     path = r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance.json'
     with open(path, 'r', encoding='utf-8') as file:
         data_dict = json.load(file)
@@ -56,6 +66,13 @@ if __name__ == '__main__':
                 video = ucf101dm.load_jpg_ucf101(vid_path,n=0)
                 spacial_analysis(video, clustered_ids, pi[0])
                 pass
+
+
+
+if __name__ == '__main__':
+    go_through_samples()
+
+
 
 
 
