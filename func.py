@@ -169,8 +169,11 @@ def calc_flow(video):
     return flow
 
 def warp_video(video, flow):
+    _,HF,_,_ = flow.shape
+    if HF!=video.size(2):
+        video = F.interpolate(video, size=(HF, HF), mode='bilinear', align_corners=False)
     B, C, H, W = video.shape
-    flow = flow.permute(0,3,1,2)
+    # flow = flow.permute(0,3,1,2)
     grid_y, grid_x = torch.meshgrid(
         torch.arange(0, H, device=video.device),
         torch.arange(0, W, device=video.device),
@@ -183,11 +186,11 @@ def warp_video(video, flow):
     grid = torch.stack((grid_x, grid_y), dim=-1).unsqueeze(0).repeat(B, 1, 1, 1)
 
     flow_normalized = torch.stack([
-        2.0 * flow[:, 0] / (W - 1),  # dx normalized
-        2.0 * flow[:, 1] / (H - 1)   # dy normalized
-    ], dim=-1).permute(0, 3, 1, 2)
+        2.0 * flow[:,:,:, 0] / (W - 1),  # dx normalized
+        2.0 * flow[:,:,:, 1] / (H - 1)   # dy normalized
+    ], dim=-1)
 
-    new_grid = grid + flow_normalized.permute(0, 2, 3, 1)
+    new_grid = grid + flow_normalized
     warped = F.grid_sample(
         video, 
         new_grid, 
@@ -229,6 +232,25 @@ def input_flow_grad(video):
     d = torch.max(d,dim=1)[0]
 
     return d,flow
+
+def dI_df(img1, img2, flow):
+    delta = 1.0
+
+    f_delta = torch.ones_like(flow) * delta
+    delta_x = f_delta.clone()
+    delta_x[:,:,1] = 0
+    delta_y = f_delta.clone()
+    delta_y[:,:,0] = 0
+
+    warped_x = warp_video(img1, (flow+delta_x).unsqueeze(0))
+    warped_y = warp_video(img1, (flow+delta_y).unsqueeze(0))
+
+
+
+
+
+
+    pass
 
 def input_flow_grad_mag(video):
     flow = calc_flow(video)
@@ -303,19 +325,17 @@ class RAFT_OF:
         )
         batch = transforms(batch)
         return batch
-    
-
 
     def predict_flow_batch(self,batch1,batch2):
-        batch1_scale = normalize_to_neg1_pos1(batch1)
-        batch2_scale = normalize_to_neg1_pos1(batch2)
-        img1_batch = self.preprocess(batch1_scale)
-        img2_batch = self.preprocess(batch2_scale)
+        img1_batch = self.preprocess(batch1)
+        img2_batch = self.preprocess(batch2)
+        batch1_scale = normalize_to_neg1_pos1(img1_batch)
+        batch2_scale = normalize_to_neg1_pos1(img2_batch)
 
         with torch.no_grad():
-            flows = self.model(img1_batch.to(self.device), img2_batch.to(self.device))
+            flows = self.model(batch1_scale.to(self.device), batch2_scale.to(self.device))
 
-        return flows
+        return flows[-1]
     
     def predict_flow_video(self, video):
         img1_batch = video[:-1,:]
@@ -485,9 +505,12 @@ class AddGaussianNoise(object):
         return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
 
 class GradcamModel(nn.Module):
-    def __init__(self, model):
+    def __init__(self, model, of_method='raft'):
         super(GradcamModel, self).__init__()
         self.model = model
+        self.of_method = of_method
+        if of_method == 'raft':
+            self.raftof = RAFT_OF()
 
         #feature extraction model for video clustering
         # weights = ResNet50_Weights.IMAGENET1K_V1
@@ -592,7 +615,31 @@ class GradcamModel(nn.Module):
         cam_int = (cam_int - cam_int.min())/(cam_int.max() - cam_int.min() + 1e-5)
         return cam_int
     
-    def calc_flow_saliency(self, x):
+    def calc_raft_of(self, x, frame_pairs):
+
+        img1_batch, img2_batch = torch.empty(0), torch.empty(0)
+        img1_batch, img2_batch = img1_batch.to('cuda'), img2_batch.to('cuda')
+
+        for f in frame_pairs:
+            img1_ = x[:,:,f[0],:]
+            img2_ = x[:,:,f[1],:]
+            img1_batch = torch.concat([img1_batch,img1_],dim=0)
+            img2_batch = torch.concat([img2_batch,img2_],dim=0)
+        
+        flows = self.raftof.predict_flow_batch(img2_batch, img1_batch)
+
+        return flows
+
+    def calc_flow_saliency(self, x, frame_pairs):
+        if self.of_method == 'raft':
+            flow = self.calc_raft_of(x, frame_pairs)
+            for p in frame_pairs:
+                flow = flow.squeeze(0).permute(1,2,0)
+                dI_dF, _ = dI_df(x[:,:,p[0],:], x[:,:,p[1],:], flow)
+                
+        pass
+
+
         slc,_ = torch.max(x.grad ,dim=0)
         slc = slc[1:,:]
         slc = slc[:,:,:,None].repeat(1,1,1,2)

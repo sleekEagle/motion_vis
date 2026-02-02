@@ -15,15 +15,17 @@ THR = 0.05
 gmodel = func.GradcamModel(model)
 gmodel.to('cuda')
 
-def spacial_analysis(video, clustered_ids, frames):
+def spacial_analysis(video, frame_pairs):
     gmodel.zero_grad()
     input = video.permute(1,0,2,3)[None,:]
     input.requires_grad = True
     input = input.to('cuda')
+    input.retain_grad()  
     pred = gmodel(input)
     pred_idx = torch.argmax(pred,dim=1)
     pred[0,pred_idx].backward()
     gcam = gmodel.calc_gradcam(input)
+    gmodel.calc_flow_saliency(input, frame_pairs)
 
     pass
 
@@ -56,16 +58,15 @@ def go_through_samples():
                 if pair_importance[0][1] < THR:
                     print('Motion is not important for this video')
                     continue
-            for i in range(1,len(pair_importance)):
-                pi = pair_importance[i]
-                g = k.split('_')[2][1:]
-                c = k.split('_')[3][1:]
-                cls_name = d['motion_importance']['gt_class']
 
-                vid_path = ucf101dm.construct_vid_path(cls_name,g,c)
-                video = ucf101dm.load_jpg_ucf101(vid_path,n=0)
-                spacial_analysis(video, clustered_ids, pi[0])
-                pass
+            g = k.split('_')[2][1:]
+            c = k.split('_')[3][1:]
+            cls_name = d['motion_importance']['gt_class']
+            vid_path = ucf101dm.construct_vid_path(cls_name,g,c)
+            video = ucf101dm.load_jpg_ucf101(vid_path,n=0)
+            pairs = [pi[0] for pi in pair_importance if pi[0]!=[None,None]]
+            frame_pairs = [(clustered_ids[str(p[0])][-1],clustered_ids[str(p[1])][0]) for p in pairs]
+            spacial_analysis(video, frame_pairs)
 
 
 
