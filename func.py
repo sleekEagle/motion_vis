@@ -233,7 +233,7 @@ def input_flow_grad(video):
 
     return d,flow
 
-def dI_df(img1, img2, flow):
+def dI_df(img0, img1, flow):
     delta = 1.0
 
     f_delta = torch.ones_like(flow) * delta
@@ -242,15 +242,18 @@ def dI_df(img1, img2, flow):
     delta_y = f_delta.clone()
     delta_y[:,:,0] = 0
 
-    warped_x = warp_video(img1, (flow+delta_x).unsqueeze(0))
-    warped_y = warp_video(img1, (flow+delta_y).unsqueeze(0))
+    if flow.size(0) != img0.size(2):
+        img0 = F.interpolate(img0, size=(flow.size(0), flow.size(0)), mode='bilinear', align_corners=False)
+        img1 = F.interpolate(img1, size=(flow.size(0), flow.size(0)), mode='bilinear', align_corners=False)
 
+    warped_x = warp_video(img0, (flow+delta_x).unsqueeze(0))
+    warped_y = warp_video(img0, (flow+delta_y).unsqueeze(0))
+    dI_x = (warped_x - img1) / delta_x[:,:,0][None,None,:,:]
+    dI_y = (warped_y - img1) / delta_y[:,:,1][None,None,:,:]
+    d = torch.concat([dI_x[:,:,:,:,None],dI_y[:,:,:,:,None]],dim=-1)
+    d = torch.max(d, dim=1)[0]
 
-
-
-
-
-    pass
+    return d
 
 def input_flow_grad_mag(video):
     flow = calc_flow(video)
@@ -633,19 +636,47 @@ class GradcamModel(nn.Module):
     def calc_flow_saliency(self, x, frame_pairs):
         if self.of_method == 'raft':
             flow = self.calc_raft_of(x, frame_pairs)
-            for p in frame_pairs:
-                flow = flow.squeeze(0).permute(1,2,0)
-                dI_dF, _ = dI_df(x[:,:,p[0],:], x[:,:,p[1],:], flow)
+            for idx, p in enumerate(frame_pairs):
+                f = flow[idx,:].permute(1,2,0)
+                dI_dF = dI_df(x[:,:,p[0],:], x[:,:,p[1],:], f)
+
+                slc,_ = torch.max(x.grad ,dim=1)
+                slc = slc[:,p[1],:]
+
+                if slc.size(1) != f.size(0):
+                    slc = F.interpolate(slc[:,None,:], size=(f.size(0), f.size(0)), mode='bilinear', align_corners=False)
+                    slc = slc[:,0,:]
+                
+                dPred_dF = slc[:,:,:,None] * dI_dF
+                dPred_dF[:,:5,:] = 0
+                dPred_dF[:,-5:,:] = 0
+                dPred_dF[:,:,:5] = 0
+                dPred_dF[:,:,-5:] = 0
+                dPred_dF = torch.sum(dPred_dF, dim=3)
+                dPred_dF =  F.relu(dPred_dF)
+
+
+                img = x[:,:,p[1],:][0,:]
+                img = F.interpolate(img[None,:], size=(f.size(0), f.size(0)), mode='bilinear', align_corners=False)
+                img = img[0,:].permute(1,2,0)
+                
+                plt.imshow(img.detach().cpu().numpy())
+                plt.imshow(dPred_dF[0,:].detach().cpu().numpy(), cmap='hot', alpha=0.5)
+                plt.show(block=True)
+
+                pass
+
+                
                 
         pass
 
 
-        slc,_ = torch.max(x.grad ,dim=0)
-        slc = slc[1:,:]
-        slc = slc[:,:,:,None].repeat(1,1,1,2)
+        # slc,_ = torch.max(x.grad ,dim=0)
+        # slc = slc[1:,:]
+        # slc = slc[:,:,:,None].repeat(1,1,1,2)
 
-        x = x.detach()
-        dI_dF, _ = input_flow_grad(x)
+        # x = x.detach()
+        # dI_dF, _ = input_flow_grad(x)
 
         # d = torch.sum(dI_dF**2,dim=-1)
         # from matplotlib import pyplot as plt
@@ -655,14 +686,14 @@ class GradcamModel(nn.Module):
         # plt.imshow(slc[4,:,:,0].cpu().numpy())
         # plt.show()
 
-        dPred_dF = slc * dI_dF
-        dPred_dF[:,:5,:] = 0
-        dPred_dF[:,-5:,:] = 0
-        dPred_dF[:,:,:5] = 0
-        dPred_dF[:,:,-5:] = 0
+        # dPred_dF = slc * dI_dF
+        # dPred_dF[:,:5,:] = 0
+        # dPred_dF[:,-5:,:] = 0
+        # dPred_dF[:,:,:5] = 0
+        # dPred_dF[:,:,-5:] = 0
 
-        dPred_dF = torch.sum(dPred_dF, dim=3)
-        dPred_dF =  F.relu(dPred_dF)
+        # dPred_dF = torch.sum(dPred_dF, dim=3)
+        # dPred_dF =  F.relu(dPred_dF)
 
         # plt.imshow(dPred_dF[6,:].cpu().numpy())
         # plt.show()
