@@ -4,9 +4,6 @@ import torch
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 
-
-
-
 #create model and data loader
 ucf101dm = func.UCF101_data_model()
 model = ucf101dm.model
@@ -29,32 +26,10 @@ def spacial_analysis(video, frame_pairs):
     pred_idx = torch.argmax(pred,dim=1)
     pred[0,pred_idx].backward()
     ret = gmodel.calc_flow_saliency(input, frame_pairs, grad_method='gradcam')
-
-    for i,p in enumerate(frame_pairs):
-        d = ret[i]
-        dPred_dF = d['dPred_dF']
-        dPred_dF_flow = d['dPred_dF*flow']
-
-        img = input[:,:,p[1],:]
-        if img.size(2)!=dPred_dF.size(1):
-            img = F.interpolate(img, size=(dPred_dF.size(0), dPred_dF.size(1)), mode='bilinear', align_corners=False)
-        
-        dPred_dF = dPred_dF.detach().cpu().numpy()
-        dPred_dF = (dPred_dF-dPred_dF.min())/(dPred_dF.max()-dPred_dF.min()+1e-5)
-
-        dPred_dF_flow = dPred_dF_flow.detach().cpu().numpy()
-        dPred_dF_flow = (dPred_dF_flow-dPred_dF_flow.min())/(dPred_dF_flow.max()-dPred_dF_flow.min()+1e-5)
-
-        plt.imshow(img[0,:].permute(1,2,0).detach().cpu().numpy())
-        plt.imshow(dPred_dF_flow, cmap='hot', alpha=0.5)
-        # plt.imshow(mag.detach().cpu().numpy(), cmap='hot', alpha=0.5)
-        # plt.imshow(slc[0,:].detach().cpu().numpy(), cmap='hot', alpha=0.5)
-        plt.show(block=True)
-
-    pass
-
+    return ret
 
 def go_through_samples():
+    img_out_paht = r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance_imgs'
     path = r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance.json'
     with open(path, 'r', encoding='utf-8') as file:
         data_dict = json.load(file)
@@ -90,7 +65,37 @@ def go_through_samples():
             video = ucf101dm.load_jpg_ucf101(vid_path,n=0)
             pairs = [pi[0] for pi in pair_importance if pi[0]!=[None,None]]
             frame_pairs = [(clustered_ids[str(p[0])][-1],clustered_ids[str(p[1])][0]) for p in pairs]
-            spacial_analysis(video, frame_pairs)
+
+            ret = spacial_analysis(video, frame_pairs)
+
+            for i,p in enumerate(frame_pairs):
+                d = ret[i]
+                dPred_dF = d['dPred_dF']
+                dPred_dF_flow = d['dPred_dF*flow']
+                flowmag = d['flow_mag']
+
+                img = video[p[1],:]
+                if img.size(2)!=dPred_dF.size(1):
+                    img = F.interpolate(img[None,:], size=(dPred_dF.size(0), dPred_dF.size(1)), mode='bilinear', align_corners=False)
+                    img=img[0,:]
+                
+                dPred_dF = dPred_dF.detach().cpu().numpy()
+                dPred_dF = (dPred_dF-dPred_dF.min())/(dPred_dF.max()-dPred_dF.min()+1e-5)
+
+                dPred_dF_flow = dPred_dF_flow.detach().cpu().numpy()
+                dPred_dF_flow = (dPred_dF_flow-dPred_dF_flow.min())/(dPred_dF_flow.max()-dPred_dF_flow.min()+1e-5)
+
+                flowmag = flowmag.detach().cpu().numpy()
+                flowmag = (flowmag-flowmag.min())/(flowmag.max()-flowmag.min()+1e-5)
+
+
+                plt.imshow(img.permute(1,2,0).detach().cpu().numpy())
+                plt.imshow(dPred_dF_flow, cmap='hot', alpha=0.5)
+                # plt.imshow(mag.detach().cpu().numpy(), cmap='hot', alpha=0.5)
+                # plt.imshow(slc[0,:].detach().cpu().numpy(), cmap='hot', alpha=0.5)
+                plt.show(block=True)
+
+            pass
 
 
 

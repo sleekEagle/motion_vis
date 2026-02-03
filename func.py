@@ -234,7 +234,7 @@ def input_flow_grad(video):
     return d,flow
 
 def dI_df(img0, img1, flow):
-    delta = 1.0
+    delta = 2.0
 
     f_delta = torch.ones_like(flow) * delta
     delta_x = f_delta.clone()
@@ -690,6 +690,8 @@ class GradcamModel(nn.Module):
                 'pair': p,
                 'dPred_dF': dPred_dF,
                 'dPred_dF*flow': dPred_dF*f_mag,
+                'flow': f,
+                'flow_mag': f_mag
             }
 
             ret[idx] = d
