@@ -633,77 +633,68 @@ class GradcamModel(nn.Module):
 
         return flows
 
-    def calc_flow_saliency(self, x, frame_pairs):
+
+    '''
+    grad_method: what method is used to find dPred_dI
+                sal: saliency (raw gradient)
+                gradcam: using gradcam
+    '''
+    def calc_flow_saliency(self, x, frame_pairs, grad_method='sal'):
         if self.of_method == 'raft':
             flow = self.calc_raft_of(x, frame_pairs)
-            for idx, p in enumerate(frame_pairs):
-                f = flow[idx,:].permute(1,2,0)
-                dI_dF = dI_df(x[:,:,p[0],:], x[:,:,p[1],:], f)
+        else:
+            #calculate OF in the classical method
+            pass
 
+        ret = {}
+
+        for idx, p in enumerate(frame_pairs):
+            f = flow[idx,:].permute(1,2,0)
+            d={}
+
+            # mag = torch.sum(f**2, dim=-1)**0.5
+            # plt.imshow(mag.detach().cpu().numpy(), cmap='hot', alpha=0.5)
+            # plt.show(block=True)
+            
+            dI_dF = dI_df(x[:,:,p[0],:], x[:,:,p[1],:], f)[0,:]
+
+            if grad_method=='sal':
                 slc,_ = torch.max(x.grad ,dim=1)
                 slc = slc[:,p[1],:]
-
                 if slc.size(1) != f.size(0):
                     slc = F.interpolate(slc[:,None,:], size=(f.size(0), f.size(0)), mode='bilinear', align_corners=False)
-                    slc = slc[:,0,:]
-                
-                dPred_dF = slc[:,:,:,None] * dI_dF
-                dPred_dF[:,:5,:] = 0
-                dPred_dF[:,-5:,:] = 0
-                dPred_dF[:,:,:5] = 0
-                dPred_dF[:,:,-5:] = 0
-                dPred_dF = torch.sum(dPred_dF, dim=3)
-                dPred_dF =  F.relu(dPred_dF)
+                    slc = slc[0,0,:][:,:,None]
+                grad = slc
+                d['slc'] = slc
 
+            elif grad_method=='gradcam':
+                gcam = self.calc_gradcam(x)[:,p[1],:]
+                if gcam.size(1) != f.size(0):
+                    gcam = F.interpolate(gcam[None,:], size=(f.size(0), f.size(0)), mode='bilinear', align_corners=False)[:,0,:]
+                gcam = gcam[0,:,:,None]
+                grad = gcam
+                d['gcam'] = gcam
 
-                img = x[:,:,p[1],:][0,:]
-                img = F.interpolate(img[None,:], size=(f.size(0), f.size(0)), mode='bilinear', align_corners=False)
-                img = img[0,:].permute(1,2,0)
-                
-                plt.imshow(img.detach().cpu().numpy())
-                plt.imshow(dPred_dF[0,:].detach().cpu().numpy(), cmap='hot', alpha=0.5)
-                plt.show(block=True)
+            dPred_dF = grad * dI_dF
+            dPred_dF =  F.relu(dPred_dF)
+            dPred_dF = torch.sum(dPred_dF**2, dim=2)**0.5
+            dPred_dF[:5,:] = 0
+            dPred_dF[-5:,:] = 0
+            dPred_dF[:,:5] = 0
+            dPred_dF[:,-5:] = 0
 
-                pass
+            f_mag = torch.sum(f**2,dim=2)**0.5
+            f_mag = (f_mag-f_mag.min())/(f_mag.max()-f_mag.min()+1e-5)
 
-                
-                
-        pass
+            d = {
+                'pair': p,
+                'dPred_dF': dPred_dF,
+                'dPred_dF*flow': dPred_dF*f_mag,
+            }
 
-
-        # slc,_ = torch.max(x.grad ,dim=0)
-        # slc = slc[1:,:]
-        # slc = slc[:,:,:,None].repeat(1,1,1,2)
-
-        # x = x.detach()
-        # dI_dF, _ = input_flow_grad(x)
-
-        # d = torch.sum(dI_dF**2,dim=-1)
-        # from matplotlib import pyplot as plt
-        # plt.imshow(d[4,:].cpu().numpy())
-        # plt.show()
-
-        # plt.imshow(slc[4,:,:,0].cpu().numpy())
-        # plt.show()
-
-        # dPred_dF = slc * dI_dF
-        # dPred_dF[:,:5,:] = 0
-        # dPred_dF[:,-5:,:] = 0
-        # dPred_dF[:,:,:5] = 0
-        # dPred_dF[:,:,-5:] = 0
-
-        # dPred_dF = torch.sum(dPred_dF, dim=3)
-        # dPred_dF =  F.relu(dPred_dF)
-
-        # plt.imshow(dPred_dF[6,:].cpu().numpy())
-        # plt.show()
-
-        # dPred_dF = (dPred_dF-dPred_dF.min())/(dPred_dF.max()-dPred_dF.min())
-        # from matplotlib import pyplot as plt
-        # plt.imshow(sal[4,:,:][:,:,None].repeat(1,1,3).cpu().numpy())
-        # plt.show()
+            ret[idx] = d
         
-        return dPred_dF
+        return ret
     
     def get_gradcam_from_video(self, video, correct_class):
         pred = self(video.unsqueeze(0))

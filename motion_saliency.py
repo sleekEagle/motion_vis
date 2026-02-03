@@ -1,6 +1,10 @@
 import func
 import json
 import torch
+import torch.nn.functional as F
+import matplotlib.pyplot as plt
+
+
 
 
 #create model and data loader
@@ -24,8 +28,28 @@ def spacial_analysis(video, frame_pairs):
     pred = gmodel(input)
     pred_idx = torch.argmax(pred,dim=1)
     pred[0,pred_idx].backward()
-    gcam = gmodel.calc_gradcam(input)
-    gmodel.calc_flow_saliency(input, frame_pairs)
+    ret = gmodel.calc_flow_saliency(input, frame_pairs, grad_method='gradcam')
+
+    for i,p in enumerate(frame_pairs):
+        d = ret[i]
+        dPred_dF = d['dPred_dF']
+        dPred_dF_flow = d['dPred_dF*flow']
+
+        img = input[:,:,p[1],:]
+        if img.size(2)!=dPred_dF.size(1):
+            img = F.interpolate(img, size=(dPred_dF.size(0), dPred_dF.size(1)), mode='bilinear', align_corners=False)
+        
+        dPred_dF = dPred_dF.detach().cpu().numpy()
+        dPred_dF = (dPred_dF-dPred_dF.min())/(dPred_dF.max()-dPred_dF.min()+1e-5)
+
+        dPred_dF_flow = dPred_dF_flow.detach().cpu().numpy()
+        dPred_dF_flow = (dPred_dF_flow-dPred_dF_flow.min())/(dPred_dF_flow.max()-dPred_dF_flow.min()+1e-5)
+
+        plt.imshow(img[0,:].permute(1,2,0).detach().cpu().numpy())
+        plt.imshow(dPred_dF_flow, cmap='hot', alpha=0.5)
+        # plt.imshow(mag.detach().cpu().numpy(), cmap='hot', alpha=0.5)
+        # plt.imshow(slc[0,:].detach().cpu().numpy(), cmap='hot', alpha=0.5)
+        plt.show(block=True)
 
     pass
 
