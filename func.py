@@ -178,7 +178,7 @@ def warp_video(video, flow):
         torch.arange(0, H, device=video.device),
         torch.arange(0, W, device=video.device),
         indexing='ij'
-    )
+    ) 
     # Normalize coordinates to [-1, 1]
     grid_x = 2.0 * grid_x / (W - 1) - 1.0
     grid_y = 2.0 * grid_y / (H - 1) - 1.0

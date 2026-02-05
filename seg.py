@@ -127,8 +127,8 @@ class Propagate:
 # raftof.visualize(frames[0:9,:],flows)
 
 
-prop = Propagate()
-prop.prop_video_path(r'C:\Users\lahir\Downloads\UCF101\jpgs\ApplyLipstick\v_ApplyLipstick_g25_c03', n=0)
+# prop = Propagate()
+# prop.prop_video_path(r'C:\Users\lahir\Downloads\UCF101\jpgs\ApplyLipstick\v_ApplyLipstick_g25_c03', n=0)
 
 
 
@@ -149,5 +149,90 @@ prop.prop_video_path(r'C:\Users\lahir\Downloads\UCF101\jpgs\ApplyLipstick\v_Appl
 
 # # The clicked_pixel variable will contain the last clicked coordinates
 # print(f"Last clicked pixel: {clicked_pixel}")
+
+def modify_flow(img1, img2, flow, x1,y1, x2,y2):
+    FLOW_RATIO = 0.9
+    #remove the original regions from img2
+    grid_y, grid_x = torch.meshgrid(
+        torch.arange(y1, y2, device=img1.device),
+        torch.arange(x1, x2, device=img1.device),
+        indexing='ij'
+    )
+    grid = torch.stack((grid_x, grid_y), dim=-1).to(flow.device)
+    grid_flow = flow[0,:,y1:y2,x1:x2].permute(1,2,0)
+
+    orig_grid = grid + grid_flow
+    mod_grid = grid + grid_flow*FLOW_RATIO
+    
+    raw_ycords = grid[:,:,0].flatten().long().to('cpu')
+    raw_xcords = grid[:,:,1].flatten().long().to('cpu')
+    
+    orig_ycords = orig_grid[:,:,0].flatten().long().to('cpu')
+    orig_xcords = orig_grid[:,:,1].flatten().long().to('cpu')
+
+    mod_ycords = mod_grid[:,:,0].flatten().long().to('cpu')
+    mod_xcords = mod_grid[:,:,1].flatten().long().to('cpu')
+
+    img2_mod = img2.clone().to('cpu')
+    img2_mod[:,:,orig_xcords,orig_ycords] = 0
+    img2_mod[:,:,mod_xcords,mod_ycords] = img1[:,:,raw_xcords,raw_ycords]
+
+    img2_orig = img2.clone().to('cpu')
+    img2_orig[:,:,orig_xcords,orig_ycords] = 0
+    img2_orig[:,:,orig_xcords,orig_ycords] = img1[:,:,raw_xcords,raw_ycords]
+
+
+    imgs = [img2, img2_orig, img2_mod]
+    imgs = [img[0,:].permute(1,2,0) for img in imgs]
+    titles = [f'Image {i+1}' for i in range(3)]
+
+    n_rows, n_cols = 1, 3
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 10))
+
+    # Flatten axes array for easy iteration
+    axes = axes.flatten()
+
+    for idx, (ax, img, title) in enumerate(zip(axes, imgs, titles)):
+        ax.imshow(img, cmap='viridis')
+        ax.set_title(title)
+        ax.axis('off')  # Turn off axes
+
+    # Hide unused subplots
+    for idx in range(len(imgs), len(axes)):
+        axes[idx].axis('off')
+
+    plt.tight_layout()
+    plt.show()
+
+
+
+    plt.imshow(img2_new[0,:].permute(1,2,0).detach().cpu().numpy())
+    plt.imshow(fmag[0,:].detach().cpu().numpy(), cmap='hot', alpha=0.5)
+    plt.show(block=True)
+
+
+
+from torchvision.io import read_image
+
+if __name__ == '__main__':
+    raftof = func.RAFT_OF()
+
+    img1_path = r'C:\Users\lahir\Downloads\UCF101\jpgs\ApplyEyeMakeup\v_ApplyEyeMakeup_g25_c07\image_00003.jpg'
+    img2_path = r'C:\Users\lahir\Downloads\UCF101\jpgs\ApplyEyeMakeup\v_ApplyEyeMakeup_g25_c07\image_00004.jpg'
+    img1 = read_image(img1_path)[None,:]
+    img2 = read_image(img2_path)[None,:]
+    img1 = F.interpolate(img1, size=(224,224), mode='bilinear', align_corners=False)
+    img2 = F.interpolate(img2, size=(224,224), mode='bilinear', align_corners=False)
+
+    flow = raftof.predict_flow_batch(img1, img2)
+
+    modify_flow(img1, img2, flow, 100,141, 113,160)
+    
+    fmag = torch.sum(flow**2,dim=1)**0.5
+    plt.imshow(img1[0,:].permute(1,2,0).detach().cpu().numpy())
+    plt.imshow(fmag[0,:].detach().cpu().numpy(), cmap='hot', alpha=0.5)
+    plt.show(block=True)
+
+
 
 
