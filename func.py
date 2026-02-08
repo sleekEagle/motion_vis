@@ -79,6 +79,21 @@ def flow_to_rgb(flow):
     
     return rgb
 
+
+def show_images_seq(img1, img2):
+    images = [img1, img2]
+    titles = ['Image 1', 'Image 2']
+    display_times = [3, 3]  # seconds
+
+    for img, title, display_time in zip(images, titles, display_times):
+        plt.figure(figsize=(8, 6))
+        plt.imshow(img)
+        plt.title(title)
+        plt.axis('off')
+        plt.show(block=False)  # Non-blocking display
+        plt.pause(display_time)  # Wait for specified time
+        plt.close()  # Close current figure
+
 def normalize_to_neg1_pos1(tensor):
     """
     Normalize ANY tensor to [-1, 1] range using min-max scaling
@@ -168,36 +183,50 @@ def calc_flow(video):
         pass
     return flow
 
-def warp_video(video, flow):
-    _,HF,_,_ = flow.shape
-    if HF!=video.size(2):
-        video = F.interpolate(video, size=(HF, HF), mode='bilinear', align_corners=False)
-    B, C, H, W = video.shape
-    # flow = flow.permute(0,3,1,2)
-    grid_y, grid_x = torch.meshgrid(
-        torch.arange(0, H, device=video.device),
-        torch.arange(0, W, device=video.device),
-        indexing='ij'
-    ) 
-    # Normalize coordinates to [-1, 1]
-    grid_x = 2.0 * grid_x / (W - 1) - 1.0
-    grid_y = 2.0 * grid_y / (H - 1) - 1.0
-    # Expand to batch size
-    grid = torch.stack((grid_x, grid_y), dim=-1).unsqueeze(0).repeat(B, 1, 1, 1)
 
-    flow_normalized = torch.stack([
-        2.0 * flow[:,:,:, 0] / (W - 1),  # dx normalized
-        2.0 * flow[:,:,:, 1] / (H - 1)   # dy normalized
-    ], dim=-1)
+def warp_batch(imgs, flow):
+    """
+    imgs: (B, C, H, W)
+    flow: (B, 2, H, W)  dx, dy in pixels
+    return: warped imgs (B, C, H, W)
+    """
 
-    new_grid = grid + flow_normalized
+    B, C, H, W = imgs.shape
+
+    # base grid (H, W)
+    y, x = torch.meshgrid(
+        torch.arange(H, device=imgs.device),
+        torch.arange(W, device=imgs.device),
+        indexing="ij"
+    )
+
+    grid = torch.stack((x, y), dim=0).float()   # (2, H, W)
+    grid = grid.unsqueeze(0).repeat(B, 1, 1, 1)  # (B, 2, H, W)
+
+    # add flow
+    vgrid = grid + flow
+
+    # normalize to [-1, 1]
+    vgrid[:, 0] = 2.0 * vgrid[:, 0] / (W - 1) - 1.0
+    vgrid[:, 1] = 2.0 * vgrid[:, 1] / (H - 1) - 1.0
+
+    vgrid = vgrid.permute(0, 2, 3, 1)  # (B, H, W, 2)
+
+    # backward warp
     warped = F.grid_sample(
-        video, 
-        new_grid, 
-        mode='bilinear', 
-        padding_mode='zeros',  # or 'border', 'reflection'
+        imgs,
+        vgrid,
+        mode="bilinear",
+        padding_mode="border",
         align_corners=True
     )
+
+    # v = torch.concat([imgs,warped])
+    # fmag = (flow**2).sum(dim=1)**0.5
+    # show_gray_image(fmag[0].cpu().numpy())
+    # play_tensor_video_opencv(v,fps=1)
+    # show_rgb_image(imgs[0].permute(1,2,0).cpu().numpy())
+    
 
     return warped
 
@@ -285,11 +314,9 @@ import tempfile
 
 class RAFT_OF:
     def __init__(self):
-        weights = Raft_Large_Weights.DEFAULT
-        self.transforms = weights.transforms()
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model = raft_large(weights=Raft_Large_Weights.DEFAULT, progress=False).to(self.device)
+        self.model = raft_large(pretrained=True, progress=False).to('cuda')
         self.model = self.model.eval()
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def resize_flow_interpolate(self, flow, target_size=(112, 112), mode='bilinear'):
         """
@@ -320,9 +347,11 @@ class RAFT_OF:
         return flow_resized
 
     def preprocess(self, batch):
+        batch = (batch-batch.min())/(batch.max()-batch.min()+1e-5)
         transforms = T.Compose(
             [
                 T.ConvertImageDtype(torch.float32),
+                T.Normalize(mean=0.5, std=0.5),  # map [0, 1] into [-1, 1]
                 T.Resize(size=(224, 224)),
             ]
         )
@@ -332,11 +361,9 @@ class RAFT_OF:
     def predict_flow_batch(self,batch1,batch2):
         img1_batch = self.preprocess(batch1)
         img2_batch = self.preprocess(batch2)
-        batch1_scale = normalize_to_neg1_pos1(img1_batch)
-        batch2_scale = normalize_to_neg1_pos1(img2_batch)
 
         with torch.no_grad():
-            flows = self.model(batch1_scale.to(self.device), batch2_scale.to(self.device))
+            flows = self.model(img1_batch.to(self.device), img2_batch.to(self.device))
 
         return flows[-1]
     
@@ -378,17 +405,32 @@ class RAFT_OF:
 Example usage of RAFT_OF
 '''
 
-# raftof = RAFT_OF()
+from torchvision.io import read_video
 
-# video_url = "https://download.pytorch.org/tutorial/pexelscom_pavel_danilyuk_basketball_hd.mp4"
-# video_path = Path(tempfile.mkdtemp()) / "basketball.mp4"
-# _ = urlretrieve(video_url, video_path)
+video_url = "https://download.pytorch.org/tutorial/pexelscom_pavel_danilyuk_basketball_hd.mp4"
+video_path = Path(tempfile.mkdtemp()) / "basketball.mp4"
+_ = urlretrieve(video_url, video_path)
+frames, _, _ = read_video(str(video_path), output_format="TCHW")
+N,C,H,W = frames.shape
+top = (H - 224) // 2
+left = (W - 224) // 2
+frames = frames[:,:,top:top+224, left:left+224]
 
+raftof = RAFT_OF()
 
-# from torchvision.io import read_video
-# frames, _, _ = read_video(str(video_path), output_format="TCHW")
-# flows = raftof.predict_flow_video(frames[0:10,:])
-# raftof.visualize(frames[0:9,:],flows)
+img1_batch = frames[310][None,:]
+img2_batch = frames[311][None,:]
+flows = raftof.predict_flow_batch(img2_batch, img1_batch)
+
+warped = warp_batch(img1_batch.float().detach(), flows.detach().cpu())
+
+play_tensor_video_opencv(torch.stack([img1_batch[0],warped[0,:]]),fps=1)
+
+play_tensor_video_opencv(torch.stack([img1_batch[0],img2_batch[0,:]]),fps=1)
+
+show_rgb_image(warped[0,:].permute(1,2,0).cpu().numpy())
+show_rgb_image(img2_batch[0].permute(1,2,0).cpu().numpy())
+
 
 def write_flow_yaml(flow, filename):
     """
@@ -605,6 +647,12 @@ class GradcamModel(nn.Module):
         return out
     
     def calc_gradcam(self, x):
+        self.zero_grad()
+        x.requires_grad = True
+        pred = self(x)
+        pred_idx = torch.argmax(pred,dim=1)
+        pred[0,pred_idx].backward()
+
         act = self.activations
         grad = self.gradients[0]
         grad = grad.mean(dim=(2,3,4),keepdim=True)

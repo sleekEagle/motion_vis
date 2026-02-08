@@ -18,6 +18,34 @@ gmodel.to('cuda')
 
 raftof = func.RAFT_OF()
 
+def show_images_seq(img1, img2):
+    import numpy as np
+    
+    # Turn on interactive mode
+    plt.ion()
+
+    # Create a figure
+    fig, ax = plt.subplots(figsize=(6, 6))
+
+    # Display first image
+    ax.imshow(np.transpose(img1, (1, 2, 0)))
+    ax.set_title("Image 1")
+    ax.axis('off')
+    plt.draw()
+    plt.pause(2)  # Show for 2 seconds
+
+    # Clear the figure and display second image
+    ax.clear()
+    ax.imshow(np.transpose(img2, (1, 2, 0)))
+    ax.set_title("Image 2")
+    ax.axis('off')
+    plt.draw()
+    plt.pause(2)  # Show for 2 seconds
+
+    # Turn off interactive mode
+    plt.ioff()
+    plt.show()
+
 def spacial_analysis(video, frame_pairs):
     gmodel.zero_grad()
     input = video.permute(1,0,2,3)[None,:]
@@ -31,11 +59,18 @@ def spacial_analysis(video, frame_pairs):
     return ret
 
 def spacial_analysis_perturb(video, frame_pairs):
+
+    #get gradcam mask for the input video
+    GCAM_THR = 0.4
+    gcam = gmodel.calc_gradcam(video.permute(1,0,2,3)[None,:].to('cuda'))
+    gcam_mask = (gcam > GCAM_THR).int()
+    # func.show_gray_image(gcam_mask[0,4,:].detach().cpu().numpy())
+
     for p in frame_pairs:
         img1 = video[p[0],:][None,:]
         img2 = video[p[1],:][None,:]
         flow = raftof.predict_flow_batch(img1, img2)
-        modify_flow(img1[0,:],img2[0,:],flow[0,:])
+        modify_flow(img1, img2, flow, gcam_mask[0,p[0],:])
     pass
 
 
@@ -46,13 +81,39 @@ def get_windows(t, window_w, stride):
     return windows
 
 
-def modify_flow(img1, img2, flow):
+def modify_flow(img1, img2, flow, mask):
     FLOW_RATIO = 0.9
-    window_w = 8
+    window_w = 16
+    MASK_THR = 0.5
 
     if img1.size(2)!=flow.size(2):
-        img1 = F.interpolate(img1[None,:], size=(flow.size(2), flow.size(2)), mode='bilinear', align_corners=False)[0,:]
-        img2 = F.interpolate(img2[None,:], size=(flow.size(2), flow.size(2)), mode='bilinear', align_corners=False)[0,:]
+        img1 = F.interpolate(img1, size=(flow.size(2), flow.size(2)), mode='bilinear', align_corners=False)[0,:]
+        img2 = F.interpolate(img2, size=(flow.size(2), flow.size(2)), mode='bilinear', align_corners=False)[0,:]
+    if mask.size(0)!=flow.size(2):
+        mask = F.interpolate(mask[None,None].float(), size=(flow.size(2), flow.size(2)), mode='bilinear', align_corners=False)[0,0,:].int()
+    
+    mask_w = get_windows(mask[None,None,:].float(), window_w, window_w).long()[0,0,:]
+    mask_mean = (mask_w.sum(dim=(0,1))/(mask_w.size(0)**2))
+    mask_mask = mask_mean > MASK_THR
+
+    #create modified flow
+    flow_w = get_windows(flow, window_w, window_w)[0,:]
+    flow_w_mod = flow_w[...,mask_mask]*FLOW_RATIO
+    valid_mask_idx = torch.nonzero(mask_mask)
+    flow_batch = flow.repeat(valid_mask_idx.size(0),1,1,1)
+    for i in range(valid_mask_idx.size(0)):
+        idx = valid_mask_idx[i]
+        f_mod_ = flow_w_mod[:,:,:,i]
+        h_, w_ = idx[0]*window_w, idx[1]*window_w
+        flow_batch[i,:,h_:h_+window_w,w_:w_+window_w] = f_mod_
+
+    #warp the image with the modified flow
+    
+
+
+
+
+    func.show_gray_image(mask_mask.float().cpu().numpy())
     
     C,H,W = img1.size()
     n_tiles_w = H//window_w
@@ -70,25 +131,31 @@ def modify_flow(img1, img2, flow):
         indexing='ij'
     )
     grid = torch.stack((grid_x, grid_y), dim=0).to(flow.device)
-    flow_grid = grid + flow
+    flow_grid = grid + flow_grid
     mod_flow_grid = grid + flow*FLOW_RATIO
+
+    grid[:,48:63,126:141]
+    flow[:,48:63,126:141]
 
     flow_grid_w = get_windows(flow_grid[None,:].float(), window_w, window_w).long()[0,:]
     flow_grid_w = flow_grid_w.to(flow.device)
     flow_grid_w = flow_grid_w.view(2,window_w,window_w,-1)
     flow_grid_w = flow_grid_w.view(2,window_w*window_w,-1).permute(0,2,1)
 
+    batch_indices = torch.arange(flow_grid_w.size(1)).repeat_interleave(flow_grid_w.size(2))
+
     h_idx = flow_grid_w[0,:].flatten()
     w_idx = flow_grid_w[1,:].flatten()
 
-    batch_indices = torch.arange(flow_grid_w.size(1)).repeat_interleave(flow_grid_w.size(2))
-
-    
     # remove original regions
-    img2_w[batch_indices,:,h_idx,w_idx] = 0
+    t = img2_w.clone()
+    t[batch_indices,:,h_idx,w_idx] = 0
+
+    plt.imshow(t[50,:].permute(1,2,0).detach().cpu().numpy())
+    plt.show(block=True)
 
     # add new regions with modified optical flow
-    
+
 
 
 
@@ -181,7 +248,7 @@ def modify_flow(img1, img2, flow):
         axes[idx].axis('off')
 
     plt.tight_layout()
-    plt.show()
+    plt.show(block=True)
 
 
 
