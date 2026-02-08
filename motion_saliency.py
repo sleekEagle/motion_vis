@@ -69,7 +69,14 @@ def spacial_analysis_perturb(video, frame_pairs):
     for p in frame_pairs:
         img1 = video[p[0],:][None,:]
         img2 = video[p[1],:][None,:]
-        flow = raftof.predict_flow_batch(img1, img2)
+        flow = raftof.predict_flow_batch(img2, img1)
+        flow = raftof.resize_flow_interpolate(flow)
+
+        # warped = func.warp_batch(img1.float().detach(), flow.detach().cpu())
+        # func.play_tensor_video_opencv(torch.stack([img1[0],warped[0,:]]),fps=1)
+        # func.play_tensor_video_opencv(torch.stack([img2[0],warped[0,:]]),fps=1)
+        # func.play_tensor_video_opencv(torch.stack([img1[0],img2[0,:]]),fps=1)
+
         modify_flow(img1, img2, flow, gcam_mask[0,p[0],:])
     pass
 
@@ -83,7 +90,7 @@ def get_windows(t, window_w, stride):
 
 def modify_flow(img1, img2, flow, mask):
     FLOW_RATIO = 0.9
-    window_w = 16
+    window_w = 8
     MASK_THR = 0.5
 
     if img1.size(2)!=flow.size(2):
@@ -108,7 +115,9 @@ def modify_flow(img1, img2, flow, mask):
         flow_batch[i,:,h_:h_+window_w,w_:w_+window_w] = f_mod_
 
     #warp the image with the modified flow
-    
+    pass
+    warp = func.warp_batch(img1.repeat(105,1,1,1).to('cuda'),flow_batch)
+
 
 
 
