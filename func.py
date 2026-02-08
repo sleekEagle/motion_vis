@@ -405,31 +405,31 @@ class RAFT_OF:
 Example usage of RAFT_OF
 '''
 
-from torchvision.io import read_video
+# from torchvision.io import read_video
 
-video_url = "https://download.pytorch.org/tutorial/pexelscom_pavel_danilyuk_basketball_hd.mp4"
-video_path = Path(tempfile.mkdtemp()) / "basketball.mp4"
-_ = urlretrieve(video_url, video_path)
-frames, _, _ = read_video(str(video_path), output_format="TCHW")
-N,C,H,W = frames.shape
-top = (H - 224) // 2
-left = (W - 224) // 2
-frames = frames[:,:,top:top+224, left:left+224]
+# video_url = "https://download.pytorch.org/tutorial/pexelscom_pavel_danilyuk_basketball_hd.mp4"
+# video_path = Path(tempfile.mkdtemp()) / "basketball.mp4"
+# _ = urlretrieve(video_url, video_path)
+# frames, _, _ = read_video(str(video_path), output_format="TCHW")
+# N,C,H,W = frames.shape
+# top = (H - 224) // 2
+# left = (W - 224) // 2
+# frames = frames[:,:,top:top+224, left:left+224]
 
-raftof = RAFT_OF()
+# raftof = RAFT_OF()
 
-img1_batch = frames[310][None,:]
-img2_batch = frames[311][None,:]
-flows = raftof.predict_flow_batch(img2_batch, img1_batch)
+# img1_batch = frames[310][None,:]
+# img2_batch = frames[311][None,:]
+# flows = raftof.predict_flow_batch(img2_batch, img1_batch)
 
-warped = warp_batch(img1_batch.float().detach(), flows.detach().cpu())
+# warped = warp_batch(img1_batch.float().detach(), flows.detach().cpu())
 
-play_tensor_video_opencv(torch.stack([img1_batch[0],warped[0,:]]),fps=1)
+# play_tensor_video_opencv(torch.stack([img1_batch[0],warped[0,:]]),fps=1)
 
-play_tensor_video_opencv(torch.stack([img1_batch[0],img2_batch[0,:]]),fps=1)
+# play_tensor_video_opencv(torch.stack([img1_batch[0],img2_batch[0,:]]),fps=1)
 
-show_rgb_image(warped[0,:].permute(1,2,0).cpu().numpy())
-show_rgb_image(img2_batch[0].permute(1,2,0).cpu().numpy())
+# show_rgb_image(warped[0,:].permute(1,2,0).cpu().numpy())
+# show_rgb_image(img2_batch[0].permute(1,2,0).cpu().numpy())
 
 
 def write_flow_yaml(flow, filename):
