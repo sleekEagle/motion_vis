@@ -11,6 +11,10 @@ model.to('cuda')
 model.eval()
 inference_loader = ucf101dm.inference_loader
 class_names = ucf101dm.inference_class_names
+class_labels = {}
+for k in class_names.keys():
+    cls_name = class_names[k]
+    class_labels[cls_name.lower()] = k
 THR = 0.05
 
 gmodel = func.GradcamModel(model)
@@ -58,7 +62,7 @@ def spacial_analysis(video, frame_pairs):
     ret = gmodel.calc_flow_saliency(input, frame_pairs, grad_method='gradcam')
     return ret
 
-def spacial_analysis_perturb(video, frame_pairs):
+def spacial_analysis_perturb(video, frame_pairs, gt_class_idx, pred_logit):
 
     #get gradcam mask for the input video
     GCAM_THR = 0.4
@@ -71,13 +75,40 @@ def spacial_analysis_perturb(video, frame_pairs):
         img2 = video[p[1],:][None,:]
         flow = raftof.predict_flow_batch(img2, img1)
         flow = raftof.resize_flow_interpolate(flow)
+        flow_mag = torch.sum(flow**2, dim=1)**0.5
+        threshold = flow_mag.mean() + 0.4*flow_mag.std()
+        flow_mask = (flow_mag > threshold).int()
+
+        mask = gcam_mask[0,p[0],:] * flow_mask
+
+        # func.show_gray_image(flow_mask[0,:].float().detach().cpu().numpy())
+
+        # func.show_gray_image(flow_mask[0,:].float().detach().cpu().numpy())
+        # func.show_rgb_image(img1[0,:].permute(1,2,0).float().detach().cpu().numpy())
 
         # warped = func.warp_batch(img1.float().detach(), flow.detach().cpu())
         # func.play_tensor_video_opencv(torch.stack([img1[0],warped[0,:]]),fps=1)
         # func.play_tensor_video_opencv(torch.stack([img2[0],warped[0,:]]),fps=1)
         # func.play_tensor_video_opencv(torch.stack([img1[0],img2[0,:]]),fps=1)
 
-        modify_flow(img1, img2, flow, gcam_mask[0,p[0],:])
+        ret = modify_flow(img1, img2, flow, mask)
+        w = ret['warped']
+        videos = torch.empty(0).to(w.device)
+        for i in range(w.size(0)):
+            v = video.clone().to('cuda')
+            v[p[1],:] = w[i,:]
+            videos = torch.cat((videos, v[None,:]), dim=0)
+        with torch.no_grad():
+            pred = model(videos.permute(0,2,1,3,4))
+            pred = F.softmax(pred, dim=1)
+            logits = pred[:,gt_class_idx]
+            print(logits)
+
+            # func.show_rgb_image(img2[0,:].permute(1,2,0).detach().cpu().numpy())
+
+
+
+        pass
     pass
 
 
@@ -88,8 +119,14 @@ def get_windows(t, window_w, stride):
     return windows
 
 
+'''
+img1: 1,3,H,W
+img2: 1,3,H,W
+flow: 1,2,H,W
+mask: H,W
+'''
 def modify_flow(img1, img2, flow, mask):
-    FLOW_RATIO = 0.9
+    FLOW_RATIO = 0.7
     window_w = 8
     MASK_THR = 0.5
 
@@ -97,7 +134,7 @@ def modify_flow(img1, img2, flow, mask):
         img1 = F.interpolate(img1, size=(flow.size(2), flow.size(2)), mode='bilinear', align_corners=False)[0,:]
         img2 = F.interpolate(img2, size=(flow.size(2), flow.size(2)), mode='bilinear', align_corners=False)[0,:]
     if mask.size(0)!=flow.size(2):
-        mask = F.interpolate(mask[None,None].float(), size=(flow.size(2), flow.size(2)), mode='bilinear', align_corners=False)[0,0,:].int()
+        mask = F.interpolate(mask[None,:].float(), size=(flow.size(2), flow.size(2)), mode='bilinear', align_corners=False)[0,0,:].int()
     
     mask_w = get_windows(mask[None,None,:].float(), window_w, window_w).long()[0,0,:]
     mask_mean = (mask_w.sum(dim=(0,1))/(mask_w.size(0)**2))
@@ -115,155 +152,18 @@ def modify_flow(img1, img2, flow, mask):
         flow_batch[i,:,h_:h_+window_w,w_:w_+window_w] = f_mod_
 
     #warp the image with the modified flow
-    pass
-    warp = func.warp_batch(img1.repeat(105,1,1,1).to('cuda'),flow_batch)
+    warp = func.warp_batch(img1.repeat(valid_mask_idx.size(0),1,1,1).to('cuda'),flow_batch)
+
+    ret = {
+        'warped': warp,
+        'window': window_w,
+        'mask': mask_mask,
+    }
+
+    return ret
 
 
-
-
-
-    func.show_gray_image(mask_mask.float().cpu().numpy())
-    
-    C,H,W = img1.size()
-    n_tiles_w = H//window_w
-    img1_w = img1[:,:,:,None,None].repeat(1,1,1,n_tiles_w,n_tiles_w).to(flow.device)
-    img1_w = img1_w.view(3,H,W,-1).permute(3,0,1,2)
-    img2_w = img2[:,:,:,None,None].repeat(1,1,1,n_tiles_w,n_tiles_w).to(flow.device)
-    img2_w = img2_w.view(3,H,W,-1).permute(3,0,1,2)
-
-    flow_w = flow[:,:,:,None,None].repeat(1,1,1,n_tiles_w,n_tiles_w).to(flow.device)
-
-    
-    grid_y, grid_x = torch.meshgrid(
-        torch.arange(0, H, device=img1.device),
-        torch.arange(0, W, device=img1.device),
-        indexing='ij'
-    )
-    grid = torch.stack((grid_x, grid_y), dim=0).to(flow.device)
-    flow_grid = grid + flow_grid
-    mod_flow_grid = grid + flow*FLOW_RATIO
-
-    grid[:,48:63,126:141]
-    flow[:,48:63,126:141]
-
-    flow_grid_w = get_windows(flow_grid[None,:].float(), window_w, window_w).long()[0,:]
-    flow_grid_w = flow_grid_w.to(flow.device)
-    flow_grid_w = flow_grid_w.view(2,window_w,window_w,-1)
-    flow_grid_w = flow_grid_w.view(2,window_w*window_w,-1).permute(0,2,1)
-
-    batch_indices = torch.arange(flow_grid_w.size(1)).repeat_interleave(flow_grid_w.size(2))
-
-    h_idx = flow_grid_w[0,:].flatten()
-    w_idx = flow_grid_w[1,:].flatten()
-
-    # remove original regions
-    t = img2_w.clone()
-    t[batch_indices,:,h_idx,w_idx] = 0
-
-    plt.imshow(t[50,:].permute(1,2,0).detach().cpu().numpy())
-    plt.show(block=True)
-
-    # add new regions with modified optical flow
-
-
-
-
-
-
-
-
-
-
-
-
-
-    ind = grid_w[0,:,:,:,0,0].view(2,64)
-    ind = ind.to('cpu')
-
-    img2[0,:,ind[0,:],ind[1,:]] = 0
-
-    plt.imshow(img2[0,:].permute(1,2,0).detach().cpu().numpy())
-
-    
-
-
-
-
-
-    flow_w = get_windows(flow, window_w, window_w)
-
-    flow_grid_w = grid_w + flow_w
-    mod_flow_grid_w = grid_w + flow_w*FLOW_RATIO
-
-
-    #remove the original regions from img2
-
-
-
-
-    pass
-
-
-
-
-
-    #remove the original regions from img2
-    grid_y, grid_x = torch.meshgrid(
-        torch.arange(y1, y2, device=img1.device),
-        torch.arange(x1, x2, device=img1.device),
-        indexing='ij'
-    )
-    grid = torch.stack((grid_x, grid_y), dim=-1).to(flow.device)
-    grid_flow = flow[0,:,y1:y2,x1:x2].permute(1,2,0)
-
-    orig_grid = grid + grid_flow
-    mod_grid = grid + grid_flow*FLOW_RATIO
-    
-    raw_ycords = grid[:,:,0].flatten().long().to('cpu')
-    raw_xcords = grid[:,:,1].flatten().long().to('cpu')
-    
-    orig_ycords = orig_grid[:,:,0].flatten().long().to('cpu')
-    orig_xcords = orig_grid[:,:,1].flatten().long().to('cpu')
-
-    mod_ycords = mod_grid[:,:,0].flatten().long().to('cpu')
-    mod_xcords = mod_grid[:,:,1].flatten().long().to('cpu')
-
-    img2_mod = img2.clone().to('cpu')
-    img2_mod[:,:,orig_xcords,orig_ycords] = 0
-    img2_mod[:,:,mod_xcords,mod_ycords] = img1[:,:,raw_xcords,raw_ycords]
-
-    img2_orig = img2.clone().to('cpu')
-    img2_orig[:,:,orig_xcords,orig_ycords] = 0
-    img2_orig[:,:,orig_xcords,orig_ycords] = img1[:,:,raw_xcords,raw_ycords]
-
-
-    imgs = [img2, img2_orig, img2_mod]
-    imgs = [img[0,:].permute(1,2,0) for img in imgs]
-    titles = [f'Image {i+1}' for i in range(3)]
-
-    n_rows, n_cols = 1, 3
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 10))
-
-    # Flatten axes array for easy iteration
-    axes = axes.flatten()
-
-    for idx, (ax, img, title) in enumerate(zip(axes, imgs, titles)):
-        ax.imshow(img, cmap='viridis')
-        ax.set_title(title)
-        ax.axis('off')  # Turn off axes
-
-    # Hide unused subplots
-    for idx in range(len(imgs), len(axes)):
-        axes[idx].axis('off')
-
-    plt.tight_layout()
-    plt.show(block=True)
-
-
-
-    plt.imshow(img2_new[0,:].permute(1,2,0).detach().cpu().numpy())
-    plt.imshow(fmag[0,:].detach().cpu().numpy(), cmap='hot', alpha=0.5)
-    plt.show(block=True)
+# func.show_gray_image(mask_mask.float().cpu().numpy())
 
 def go_through_samples():
     img_out_paht = r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance_imgs'
@@ -276,6 +176,8 @@ def go_through_samples():
 
         #consider only samples that are correcly predicted
         gt_class = d['motion_importance']['gt_class']
+        gt_class_idx = class_labels[gt_class.lower()]
+        pred_logit = d['motion_importance']['pred_original_logit']
         pred_class = d['motion_importance']['pred_original_class']
         if gt_class.lower() != pred_class.lower():
             continue
@@ -303,7 +205,7 @@ def go_through_samples():
             pairs = [pi[0] for pi in pair_importance if pi[0]!=[None,None]]
             frame_pairs = [(clustered_ids[str(p[0])][-1],clustered_ids[str(p[1])][0]) for p in pairs]
 
-            ret = spacial_analysis_perturb(video, frame_pairs)
+            ret = spacial_analysis_perturb(video, frame_pairs, gt_class_idx, pred_logit)
 
             for i,p in enumerate(frame_pairs):
                 d = ret[i]
