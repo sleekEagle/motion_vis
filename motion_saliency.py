@@ -104,12 +104,13 @@ def spacial_analysis_perturb(video, frame_pairs, gt_class_idx, pred_logit, order
             pred = model(videos)
             pred = F.softmax(pred, dim=1)
             logits = pred[:,gt_class_idx]
-        logits = (logits - logits.min())/(logits.max()-logits.min()+1e-5)
-        logits = logits[None,None,None,:].repeat(3,window,window,1)
+        imp = pred_logit - logits
+        imp = (imp - imp.min())/(imp.max()-imp.min()+1e-5)
+        imp = imp[None,None,None,:].repeat(3,window,window,1)
 
         hm = torch.zeros_like(img2)
         hm_w = get_windows(hm, 8, 8)[0,:]
-        hm_w[...,mask.to(hm_w.device)] = logits.to(hm_w.device)
+        hm_w[...,mask.to(hm_w.device)] = imp.to(hm_w.device)
 
         img = hm_w[:,0,0,:]
         func.show_gray_image(img[0,:].detach().cpu().numpy())
@@ -221,7 +222,7 @@ def go_through_samples():
             ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
 
             video = func.create_new_video(video.permute(1,0,2,3), ordered_keys, clustered_ids)
-            ret = spacial_analysis_perturb(video, frame_pairs, gt_class_idx, pred_logit, ordered_keys, clustered_ids)
+            ret = spacial_analysis_perturb(video, frame_pairs, gt_class_idx, d['pair_analysis']['new_logit'], ordered_keys, clustered_ids)
 
             for i,p in enumerate(frame_pairs):
                 d = ret[i]
