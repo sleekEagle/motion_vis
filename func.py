@@ -299,6 +299,32 @@ def input_flow_grad_mag(video):
     return dI_dF, flow
 
 
+
+''''
+function to modify video 
+'''
+
+#video: 3, t , h , w
+def create_new_video(video, ordered_keys, frame_cluster_idxs):
+    new_video = torch.zeros_like(video)
+    cur_idx=0
+    for k in ordered_keys:
+        for f in frame_cluster_idxs[k]:
+            new_video[:,cur_idx,:] = video[:,f,:]
+            cur_idx += 1
+    return new_video
+
+def replace_frame(video, ordered_keys, frame_cluster_idxs, key, img):
+    new_video = video.clone()
+    cur_idx=0
+    for k in ordered_keys:
+        for f in frame_cluster_idxs[k]:
+            if int(k)==key:
+                new_video[:,cur_idx,:] = img    
+            cur_idx += 1
+    return new_video
+
+
 import numpy as np
 import torch
 import matplotlib.pyplot as plt

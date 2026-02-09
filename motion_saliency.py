@@ -62,17 +62,17 @@ def spacial_analysis(video, frame_pairs):
     ret = gmodel.calc_flow_saliency(input, frame_pairs, grad_method='gradcam')
     return ret
 
-def spacial_analysis_perturb(video, frame_pairs, gt_class_idx, pred_logit):
+def spacial_analysis_perturb(video, frame_pairs, gt_class_idx, pred_logit, ordered_keys, clustered_ids):
 
     #get gradcam mask for the input video
     GCAM_THR = 0.4
-    gcam = gmodel.calc_gradcam(video.permute(1,0,2,3)[None,:].to('cuda'))
+    gcam = gmodel.calc_gradcam(video[None,:].to('cuda'))
     gcam_mask = (gcam > GCAM_THR).int()
     # func.show_gray_image(gcam_mask[0,4,:].detach().cpu().numpy())
 
     for p in frame_pairs:
-        img1 = video[p[0],:][None,:]
-        img2 = video[p[1],:][None,:]
+        img1 = video[:,p[0],:][None,:]
+        img2 = video[:,p[1],:][None,:]
         flow = raftof.predict_flow_batch(img2, img1)
         flow = raftof.resize_flow_interpolate(flow)
         flow_mag = torch.sum(flow**2, dim=1)**0.5
@@ -92,17 +92,31 @@ def spacial_analysis_perturb(video, frame_pairs, gt_class_idx, pred_logit):
         # func.play_tensor_video_opencv(torch.stack([img1[0],img2[0,:]]),fps=1)
 
         ret = modify_flow(img1, img2, flow, mask)
-        w = ret['warped']
-        videos = torch.empty(0).to(w.device)
-        for i in range(w.size(0)):
-            v = video.clone().to('cuda')
-            v[p[1],:] = w[i,:]
-            videos = torch.cat((videos, v[None,:]), dim=0)
+        warped = ret['warped']
+        mask = ret['mask']
+        window = ret['window']
+
+        videos = torch.empty(0).to(warped.device)
+        for i in range(warped.size(0)):
+            v = func.replace_frame(video, ordered_keys, clustered_ids, p[1], warped[i,:])
+            videos = torch.cat((videos, v[None,:].to(warped.device)), dim=0)
         with torch.no_grad():
-            pred = model(videos.permute(0,2,1,3,4))
+            pred = model(videos)
             pred = F.softmax(pred, dim=1)
             logits = pred[:,gt_class_idx]
-            print(logits)
+        logits = (logits - logits.min())/(logits.max()-logits.min()+1e-5)
+        logits = logits[None,None,None,:].repeat(3,window,window,1)
+
+        hm = torch.zeros_like(img2)
+        hm_w = get_windows(hm, 8, 8)[0,:]
+        hm_w[...,mask.to(hm_w.device)] = logits.to(hm_w.device)
+
+        img = hm_w[:,0,0,:]
+        func.show_gray_image(img[0,:].detach().cpu().numpy())
+
+        func.show_gray_image(img2[0,0,:].detach().cpu().numpy())
+
+
 
             # func.show_rgb_image(img2[0,:].permute(1,2,0).detach().cpu().numpy())
 
@@ -126,9 +140,9 @@ flow: 1,2,H,W
 mask: H,W
 '''
 def modify_flow(img1, img2, flow, mask):
-    FLOW_RATIO = 0.7
+    FLOW_RATIO = 0.9
     window_w = 8
-    MASK_THR = 0.5
+    MASK_THR = 0.8
 
     if img1.size(2)!=flow.size(2):
         img1 = F.interpolate(img1, size=(flow.size(2), flow.size(2)), mode='bilinear', align_corners=False)[0,:]
@@ -204,8 +218,10 @@ def go_through_samples():
             video = ucf101dm.load_jpg_ucf101(vid_path,n=0)
             pairs = [pi[0] for pi in pair_importance if pi[0]!=[None,None]]
             frame_pairs = [(clustered_ids[str(p[0])][-1],clustered_ids[str(p[1])][0]) for p in pairs]
+            ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
 
-            ret = spacial_analysis_perturb(video, frame_pairs, gt_class_idx, pred_logit)
+            video = func.create_new_video(video.permute(1,0,2,3), ordered_keys, clustered_ids)
+            ret = spacial_analysis_perturb(video, frame_pairs, gt_class_idx, pred_logit, ordered_keys, clustered_ids)
 
             for i,p in enumerate(frame_pairs):
                 d = ret[i]
