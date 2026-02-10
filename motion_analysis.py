@@ -86,7 +86,7 @@ def get_avg_pred(video, clustered_ids, combinations):
     #create video with the solutions
     comb_vids = torch.empty(0).to(video.device)
     for comb in combinations:
-        comb_vid = create_new_video(video, comb, clustered_ids)
+        comb_vid = create_new_video(video, clustered_ids, comb)
         comb_vids = torch.concatenate([comb_vids,comb_vid.unsqueeze(0)])
 
     pred_comb = model(comb_vids).mean(dim=0)
@@ -284,7 +284,8 @@ def motion_importance_dataset():
                 new_idx = sorted_indices[i]
                 clustered_ids = create_frame_cluster_idxs(used_values + [new_idx])
                 #update the video with only the valuable frames
-                video_ = create_new_video(video, clustered_ids)
+                ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
+                video_ = create_new_video(video, clustered_ids, ordered_keys)
                 ret = get_pred_stats(video_, gt_class, pred_logit)
 
                 logit_increase = ret['logit'] - prev_logit
@@ -336,38 +337,44 @@ def motion_importance_dataset():
                             else:
                                 clustered_ids = c0
 
-                    v0_= create_new_video(video, clustered_ids)
-                    r_ = get_pred_stats(v0_, gt_class, pred_logit)
+                    # v0_= create_new_video(video, clustered_ids)
+                    # r_ = get_pred_stats(v0_, gt_class, pred_logit)
 
                     pairs = get_motion_pairs(clustered_ids)
                     pairs.insert(0,(None,None))
                     vals = list(clustered_ids.keys())
 
                     pair_imp = []
-                    for pair in pairs:
-                        vals_ = vals.copy()
-                        not_nan_idx = [i for i, v in enumerate(vals_) if v not in pair]
-                        for i in not_nan_idx:
-                            vals_[i] = None
-                        fill_numbers = [c for c in vals if c not in vals_]
-                        fobbiden_pairs_ = [p for p in pairs if p != pair]
-                        combinations = sample_fill_array(vals_, fill_numbers, fobbiden_pairs_,
-                                        max_solutions=20,
-                                        max_trials=5000
-                                    )
-                        # check solutions to see if it has forbidden pairs
-                        # for comb in combinations:
-                        #     for i in range(len(comb)-1):
-                        #         pair = (comb[i],comb[i+1])
-                        #         if pair in fobbiden_pairs_:
-                        #             print('forbidden pair detected')
-                        #             break
-                        # print('check complete')
+                    if len(pairs)==2:
+                        pair = pairs[1]
+                        v_ = create_new_video(video, clustered_ids, (pair[1], pair[0]))
+                        r_ = get_pred_stats(v_, gt_class, pred_logit)
+                        pair_imp.append((pair, r_['per_change']))
+                    else:
+                        for pair in pairs:
+                            vals_ = vals.copy()
+                            not_nan_idx = [i for i, v in enumerate(vals_) if v not in pair]
+                            for i in not_nan_idx:
+                                vals_[i] = None
+                            fill_numbers = [c for c in vals if c not in vals_]
+                            fobbiden_pairs_ = [p for p in pairs if p != pair]
+                            combinations = sample_fill_array(vals_, fill_numbers, fobbiden_pairs_,
+                                            max_solutions=20,
+                                            max_trials=5000
+                                        )
+                            # check solutions to see if it has forbidden pairs
+                            # for comb in combinations:
+                            #     for i in range(len(comb)-1):
+                            #         pair = (comb[i],comb[i+1])
+                            #         if pair in fobbiden_pairs_:
+                            #             print('forbidden pair detected')
+                            #             break
+                            # print('check complete')
 
-                        avg_pred = get_avg_pred(video, clustered_ids, combinations)
-                        comb_logit = avg_pred[:,gt_class].item()
-                        comb_per_change = (pred_logit-comb_logit)/pred_logit
-                        pair_imp.append((pair, comb_per_change))
+                            avg_pred = get_avg_pred(video, clustered_ids, combinations)
+                            comb_logit = avg_pred[:,gt_class].item()
+                            comb_per_change = (pred_logit-comb_logit)/pred_logit
+                            pair_imp.append((pair, comb_per_change))
 
                     pair_analysis['pair_importance'] = pair_imp
                     pair_analysis['clustered_ids'] = clustered_ids
@@ -397,10 +404,11 @@ def motion_importance_dataset():
 
 #**************************************************************************************
 
-def create_new_video(video, frame_cluster_idxs):
-    ordered_keys = list(dict(sorted(frame_cluster_idxs.items(), key=lambda x: x[1][0])).keys())
+def create_new_video(video, frame_cluster_idxs, ordered_keys=None):
     new_video = torch.zeros_like(video)
     cur_idx=0
+    if ordered_keys == None:
+        ordered_keys = frame_cluster_idxs.keys()
     for k in ordered_keys:
         for f in frame_cluster_idxs[k]:
             new_video[:,cur_idx,:] = video[:,f,:]
