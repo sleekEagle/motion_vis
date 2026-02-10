@@ -290,8 +290,6 @@ def motion_importance_dataset():
 
                 logit_increase = ret['logit'] - prev_logit
 
-                print(logit_increase)
-
                 # if logit_increase < 0:
                 #     continue
                 
