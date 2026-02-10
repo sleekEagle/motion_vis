@@ -3,6 +3,8 @@ import json
 import torch
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+import numpy as np
+import cv2
 
 #create model and data loader
 ucf101dm = func.UCF101_data_model()
@@ -65,31 +67,29 @@ def spacial_analysis(video, frame_pairs):
 def spacial_analysis_perturb(video, frame_pairs, gt_class_idx, pred_logit, ordered_keys, clustered_ids):
 
     #get gradcam mask for the input video
-    GCAM_THR = 0.4
+    GCAM_THR = 0.2
     gcam = gmodel.calc_gradcam(video[None,:].to('cuda'))
     gcam_mask = (gcam > GCAM_THR).int()
     # func.show_gray_image(gcam_mask[0,4,:].detach().cpu().numpy())
 
+    heatmaps = []
     for p in frame_pairs:
         img1 = video[:,p[0],:][None,:]
         img2 = video[:,p[1],:][None,:]
         flow = raftof.predict_flow_batch(img2, img1)
         flow = raftof.resize_flow_interpolate(flow)
         flow_mag = torch.sum(flow**2, dim=1)**0.5
-        threshold = flow_mag.mean() + 0.4*flow_mag.std()
+        # threshold = flow_mag.mean() + flow_mag.std()
+        threshold = 0.5
         flow_mask = (flow_mag > threshold).int()
 
         mask = gcam_mask[0,p[0],:] * flow_mask
 
-        # func.show_gray_image(flow_mask[0,:].float().detach().cpu().numpy())
+        # func.show_gray_image(flow_mask[0,:].detach().cpu().numpy())
+        # func.show_rgb_image(img1[0,:].permute(1,2,0).detach().cpu().numpy())
+        # v = torch.cat((img1,img2), dim=0)
+        # func.play_tensor_video_opencv(v,fps=2)
 
-        # func.show_gray_image(flow_mask[0,:].float().detach().cpu().numpy())
-        # func.show_rgb_image(img1[0,:].permute(1,2,0).float().detach().cpu().numpy())
-
-        # warped = func.warp_batch(img1.float().detach(), flow.detach().cpu())
-        # func.play_tensor_video_opencv(torch.stack([img1[0],warped[0,:]]),fps=1)
-        # func.play_tensor_video_opencv(torch.stack([img2[0],warped[0,:]]),fps=1)
-        # func.play_tensor_video_opencv(torch.stack([img1[0],img2[0,:]]),fps=1)
 
         ret = modify_flow(img1, img2, flow, mask)
         warped = ret['warped']
@@ -106,25 +106,27 @@ def spacial_analysis_perturb(video, frame_pairs, gt_class_idx, pred_logit, order
             logits = pred[:,gt_class_idx]
         imp = pred_logit - logits
         imp = (imp - imp.min())/(imp.max()-imp.min()+1e-5)
-        imp = imp[None,None,None,:].repeat(3,window,window,1)
+        imp = imp[None,None,:].repeat(window,window,1)
 
-        hm = torch.zeros_like(img2)
-        hm_w = get_windows(hm, 8, 8)[0,:]
+        hm = torch.zeros(1, 1, img2.size(2), img2.size(3))
+        hm_w = get_windows(hm, window, window)[0,0,:]
         hm_w[...,mask.to(hm_w.device)] = imp.to(hm_w.device)
 
-        img = hm_w[:,0,0,:]
-        func.show_gray_image(img[0,:].detach().cpu().numpy())
+        heatmap = hm_w[0,0,:]
+        heatmap = F.interpolate(heatmap[None,None,:], size=(112,112), mode='bilinear', align_corners=False)
+        heatmap = heatmap**1
+        heatmap = (heatmap - heatmap.min())/(heatmap.max()-heatmap.min()+1e-5)
+        heatmap = -1*heatmap+1
+        transformed = np.uint8(heatmap[0,0,:].numpy()*255)
+        h_col = cv2.applyColorMap(transformed, cv2.COLORMAP_JET)
 
-        func.show_gray_image(img2[0,0,:].detach().cpu().numpy())
+        img = np.uint8(((img2 - img2.min())/(img2.max() - img2.min()+1e-5)*255)[0,:].permute(1,2,0))
 
-
-
-            # func.show_rgb_image(img2[0,:].permute(1,2,0).detach().cpu().numpy())
-
-
-
-        pass
-    pass
+        final_img = cv2.addWeighted(img, 0.6, h_col, 0.4, 0)
+        final_img = cv2.cvtColor(final_img, cv2.COLOR_RGB2BGR)
+        heatmaps.append(final_img)
+        # cv2.imwrite('output_opencv.jpg', final_img)
+    return heatmaps
 
 
 def get_windows(t, window_w, stride):
@@ -141,7 +143,7 @@ flow: 1,2,H,W
 mask: H,W
 '''
 def modify_flow(img1, img2, flow, mask):
-    FLOW_RATIO = 0.9
+    FLOW_RATIO = 0.8
     window_w = 8
     MASK_THR = 0.8
 
@@ -179,9 +181,10 @@ def modify_flow(img1, img2, flow, mask):
 
 
 # func.show_gray_image(mask_mask.float().cpu().numpy())
+import os
 
 def go_through_samples():
-    img_out_paht = r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance_imgs'
+    img_out_path = r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance_imgs'
     path = r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance.json'
     with open(path, 'r', encoding='utf-8') as file:
         data_dict = json.load(file)
@@ -206,6 +209,10 @@ def go_through_samples():
             # what sub set of frames can be used to explain the whole video ?
             clustered_ids = d['pair_analysis']['clustered_ids']
             pair_importance = d['pair_analysis']['pair_importance'] # this is percentage change. lower, better
+            # for pi in pair_importance:
+            #     print(f'{pi[0]}: {pi[1]}')
+
+            
 
             if pair_importance[0][0] == [None,None]:
                 if pair_importance[0][1] < THR:
@@ -222,35 +229,35 @@ def go_through_samples():
             ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
 
             video = func.create_new_video(video.permute(1,0,2,3), ordered_keys, clustered_ids)
-            ret = spacial_analysis_perturb(video, frame_pairs, gt_class_idx, d['pair_analysis']['new_logit'], ordered_keys, clustered_ids)
+            heatmaps = spacial_analysis_perturb(video, frame_pairs, gt_class_idx, d['pair_analysis']['new_logit'], ordered_keys, clustered_ids)
 
-            for i,p in enumerate(frame_pairs):
-                d = ret[i]
-                dPred_dF = d['dPred_dF']
-                dPred_dF_flow = d['dPred_dF*flow']
-                flowmag = d['flow_mag']
-
-                img = video[p[1],:]
-                if img.size(2)!=dPred_dF.size(1):
-                    img = F.interpolate(img[None,:], size=(dPred_dF.size(0), dPred_dF.size(1)), mode='bilinear', align_corners=False)
-                    img=img[0,:]
-                
-                dPred_dF = dPred_dF.detach().cpu().numpy()
-                dPred_dF = (dPred_dF-dPred_dF.min())/(dPred_dF.max()-dPred_dF.min()+1e-5)
-
-                dPred_dF_flow = dPred_dF_flow.detach().cpu().numpy()
-                dPred_dF_flow = (dPred_dF_flow-dPred_dF_flow.min())/(dPred_dF_flow.max()-dPred_dF_flow.min()+1e-5)
-
-                flowmag = flowmag.detach().cpu().numpy()
-                flowmag = (flowmag-flowmag.min())/(flowmag.max()-flowmag.min()+1e-5)
+            # img1 = video[:,0,:].permute(1,2,0).detach().cpu().numpy()
+            # img2 = video[:,1,:].permute(1,2,0).detach().cpu().numpy()
+            # v = np.concatenate((img1[None,:], img2[None,:]), axis=0)
+            # func.play_tensor_video_opencv(v,fps=1)
 
 
-                plt.imshow(img.permute(1,2,0).detach().cpu().numpy())
-                plt.imshow(dPred_dF_flow, cmap='hot', alpha=0.5)
-                # plt.imshow(mag.detach().cpu().numpy(), cmap='hot', alpha=0.5)
-                # plt.imshow(slc[0,:].detach().cpu().numpy(), cmap='hot', alpha=0.5)
-                plt.show(block=True)
 
+
+
+
+            from pathlib import Path
+            sub_dir = os.path.join(img_out_path, gt_class)
+            os.makedirs(sub_dir, exist_ok=True)
+            int_names = [int(file.name.split('_')[0]) for file in Path(sub_dir).iterdir() if file.is_file()]
+            if len(int_names) == 0:
+                next_file = '0'
+            else:
+                next_file = str(max(int_names)+1)
+
+            for i, hm in enumerate(heatmaps):
+                p = frame_pairs[i]
+                out_path = os.path.join(sub_dir, f'{next_file}_{p[0]}_{p[1]}.jpg')
+                cv2.imwrite(out_path, hm)
+
+
+
+            
             pass
 
 

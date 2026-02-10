@@ -319,7 +319,7 @@ def replace_frame(video, ordered_keys, frame_cluster_idxs, key, img):
     cur_idx=0
     for k in ordered_keys:
         for f in frame_cluster_idxs[k]:
-            if int(k)==key:
+            if f==key:
                 new_video[:,cur_idx,:] = img    
             cur_idx += 1
     return new_video

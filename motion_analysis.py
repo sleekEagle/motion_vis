@@ -94,6 +94,35 @@ def get_avg_pred(video, clustered_ids, combinations):
 
     return pred_comb
 
+def get_pred_stats(v, gt_class=None, orig_pred_logit=None):
+    ret = {}
+    with torch.no_grad():
+        pred = model(v.unsqueeze(0))
+    pred = F.softmax(pred,dim=1)
+    pred_cls = torch.argmax(pred,dim=1).item()
+    pred_logit = pred[:,pred_cls].item()
+    ret['pred_logit'] = pred_logit
+
+    if gt_class is not None:
+        logit = pred[:,gt_class].item()
+        per_change = (orig_pred_logit - logit)/orig_pred_logit
+        ret['per_change'] = per_change
+        ret['logit'] = logit
+
+    return ret
+
+def replace_cluster(clustered_ids, source_key, dest_key):
+    ids = clustered_ids.copy()
+    l = len(clustered_ids[dest_key]) + len(clustered_ids[source_key])
+    ids[dest_key] = [clustered_ids[source_key][0]]*l
+    del ids[source_key]
+    # ordered_keys = dict(sorted(ids.items(), key=lambda x: x[1][0]))
+    new_key = clustered_ids[source_key][0]
+    if new_key!=dest_key:
+        ids[new_key] = ids.pop(dest_key)
+        ids = dict(sorted(ids.items(), key=lambda x:x[1][0]))
+    return ids
+
 '''
 Monte-Carlo method to fill the array and avoid the forbidden pairs
 '''
@@ -207,6 +236,11 @@ def get_uniqueval_indices(ids):
         cluster_ids[id.item()] = [int(i) for i in args[i][:,0]]
     return cluster_ids
 
+'''
+ApplyLipstick
+pred_orig_logit = 0.8397961854934692
+'''
+
 def motion_importance_dataset():
     output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance.json')
     change_threshold = 0.05
@@ -220,8 +254,9 @@ def motion_importance_dataset():
         video = inputs[0].to('cuda')
         gt_class_name = targets[0][0].split('_')[1]
         file_name = targets[0][0]
-        # if file_name != 'v_ApplyEyeMakeup_g03_c01':
+        # if file_name != 'v_ApplyLipstick_g03_c03':
         #     continue
+
         seq = targets[0][1]
         ret = motion_importance(video.unsqueeze(0))
         pred_logit = ret['pred_original_logit']
@@ -238,31 +273,72 @@ def motion_importance_dataset():
         file_analysis['motion_importance'] = ret
 
         if lowest_perc_change > change_threshold: #there is no single frame that can exaplain the whole video
+            found_sol=False
             file_analysis['single_frame_structure'] = False
             sorted_indices = [i for i, _ in sorted(enumerate(all_logits), key=lambda x: x[1], reverse=True)]
             file_analysis['sorted_importance_frame_idx'] = sorted_indices
 
-            for i in range(2, len(sorted_indices)+1):
-                valuable_indices = sorted_indices[0:i]
-                clustered_ids = create_frame_cluster_idxs(valuable_indices)
+            prev_logit = 0
+            used_values = [sorted_indices[0]]                
+            for i in range(1, len(sorted_indices)):
+                new_idx = sorted_indices[i]
+                clustered_ids = create_frame_cluster_idxs(used_values + [new_idx])
                 #update the video with only the valuable frames
-                ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
-                video_ = create_new_video(video, ordered_keys, clustered_ids)
+                video_ = create_new_video(video, clustered_ids)
+                ret = get_pred_stats(video_, gt_class, pred_logit)
 
-                pred_ = model(video_.unsqueeze(0))
-                pred_ = F.softmax(pred_,dim=1)
-                pred_cls_ = torch.argmax(pred_,dim=1)
-                logit = pred_[:,gt_class].item()
+                logit_increase = ret['logit'] - prev_logit
 
-                percent_change_ = (pred_logit - logit)/pred_logit
+                print(logit_increase)
+
+                # if logit_increase < 0:
+                #     continue
+                
+                prev_logit = ret['logit']
+                used_values.append(new_idx)
+
+                percent_change_ = (pred_logit - ret['logit'])/pred_logit
 
                 if percent_change_ <= change_threshold: #the video can be explained well (enough) just with the given set of frames
+                    found_sol = True
                     pair_analysis = {}
-                    pair_analysis['new_logit'] = logit
+                    pair_analysis['new_logit'] = ret['logit']
                     pair_analysis['percent_change_'] = percent_change_
 
                     #check if the motion among the frames are important for this prediction
                     clustered_ids = dict(sorted(clustered_ids.items(), key=lambda x:x[1][0]))
+                    pairs = get_motion_pairs(clustered_ids)
+
+                    # v = create_new_video(video_, ordered_keys, clustered_ids)
+                    # r = get_pred_stats(v, gt_class, pred_logit)
+
+                    # check if there are adjecent frames with insignificant motion
+                    # if there are any get rid of these pairs
+                    for p in pairs:
+                        pairs_ = get_motion_pairs(clustered_ids)
+                        if p not in pairs_:
+                            continue
+                        c0 = replace_cluster(clustered_ids, p[0], p[1])
+                        v0 = create_new_video(video, c0)
+                        c1 = replace_cluster(clustered_ids, p[1], p[0])
+                        v1 = create_new_video(video, c1)
+
+                        # (v1[:,15,:,:] == video[:,15,:, :]).all()
+
+                        r0 = get_pred_stats(v0, gt_class, pred_logit)
+                        r1 = get_pred_stats(v1, gt_class, pred_logit)
+
+                        maxlog = max(r0['logit'],r1['logit'])
+                        pc = (pred_logit - maxlog)/pred_logit
+                        if pc <= change_threshold:
+                            if r0['logit']<r1['logit']:
+                                clustered_ids = c1
+                            else:
+                                clustered_ids = c0
+
+                    v0_= create_new_video(video, clustered_ids)
+                    r_ = get_pred_stats(v0_, gt_class, pred_logit)
+
                     pairs = get_motion_pairs(clustered_ids)
                     pairs.insert(0,(None,None))
                     vals = list(clustered_ids.keys())
@@ -299,6 +375,7 @@ def motion_importance_dataset():
 
                     #break if the first solution is found s.t. percent_change_ <= change_threshold
                     break
+            assert not ((gt_class_name.lower()==pred_class.lower()) and not found_sol), "Error. The prediction is correct but no solution found"
         else: # there is atleas a single frame that can explain the video classificaiton
             file_analysis['single_frame_structure'] = True
 
@@ -320,13 +397,21 @@ def motion_importance_dataset():
 
 #**************************************************************************************
 
-def create_new_video(video, ordered_keys, frame_cluster_idxs):
+def create_new_video(video, frame_cluster_idxs):
+    ordered_keys = list(dict(sorted(frame_cluster_idxs.items(), key=lambda x: x[1][0])).keys())
     new_video = torch.zeros_like(video)
     cur_idx=0
     for k in ordered_keys:
         for f in frame_cluster_idxs[k]:
             new_video[:,cur_idx,:] = video[:,f,:]
             cur_idx += 1
+    return new_video
+
+def replace_frames(video, source_key, dest_key, frame_cluster_idxs):
+    new_video = video.clone()
+    source_frame = new_video[:,frame_cluster_idxs[source_key][0],:]
+    dest_idxs = frame_cluster_idxs[dest_key]
+    new_video[:,dest_idxs,:] = source_frame.unsqueeze(1).repeat(1,len(dest_idxs),1,1)
     return new_video
 
 def create_frame_cluster_idxs(idx_list, len_array=16):
