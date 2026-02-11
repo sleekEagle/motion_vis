@@ -237,9 +237,7 @@ def get_uniqueval_indices(ids):
     return cluster_ids
 
 '''
-ApplyLipstick
-pred_orig_logit = 0.8397961854934692
-0.854
+accuracy = 0.854
 '''
 
 def motion_importance_dataset():
