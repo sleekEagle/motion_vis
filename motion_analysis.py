@@ -335,12 +335,12 @@ def motion_importance_dataset():
                     pairs.insert(0,(None,None))
                     vals = list(clustered_ids.keys())
 
-                    pair_per_change = []
+                    pair_avg_logit = []
                     if len(pairs)==2:
                         pair = pairs[1]
                         v_ = create_new_video(video, clustered_ids, (pair[1], pair[0]))
                         r_ = get_pred_stats(v_, gt_class, pred_logit)
-                        pair_per_change.append((pair, r_['per_change']))
+                        pair_avg_logit.append((pair, r_['per_change']))
                     else:
                         for pair in pairs:
                             vals_ = vals.copy()
@@ -364,10 +364,9 @@ def motion_importance_dataset():
 
                             avg_pred = get_avg_pred(video, clustered_ids, combinations)
                             avg_logit = avg_pred[:,gt_class].item()
-                            avg_per_change = (pred_logit-avg_logit)/pred_logit
-                            pair_per_change.append((pair, avg_per_change))
+                            pair_avg_logit.append((pair, avg_logit))
 
-                    pair_analysis['pair_importance'] = pair_per_change
+                    pair_analysis['pair_importance'] = pair_avg_logit
                     pair_analysis['clustered_ids'] = clustered_ids
                     file_analysis['pair_analysis'] = pair_analysis
 
