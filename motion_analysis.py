@@ -220,14 +220,6 @@ solutions = sample_fill_array(
 )
 '''
 
-def get_motion_pairs(ids):
-    pairs = []
-    keys = list(ids.keys())
-    for idx in range(len(keys)-1):
-        pairs.append((keys[idx], keys[idx+1]))
-
-    return pairs
-
 def get_uniqueval_indices(ids):
     unique_ids = np.unique(list(ids.keys()))
     args = [np.argwhere(ids==id) for id in unique_ids]
@@ -301,7 +293,7 @@ def motion_importance_dataset():
 
                     #check if the motion among the frames are important for this prediction
                     clustered_ids = dict(sorted(clustered_ids.items(), key=lambda x:x[1][0]))
-                    pairs = get_motion_pairs(clustered_ids)
+                    pairs = func.get_motion_pairs(clustered_ids)
 
                     # check if there are adjecent frames with insignificant motion
                     # if there are any get rid of these pairs
@@ -325,13 +317,14 @@ def motion_importance_dataset():
                             else:
                                 clustered_ids = c0
                         used_pairs.append(p)
-                        pairs = get_motion_pairs(clustered_ids)
+                        pairs = func.get_motion_pairs(clustered_ids)
                         p = next(filter(lambda p: p not in used_pairs, pairs), -1)
 
-                    # v0_= create_new_video(video, clustered_ids)
-                    # r_ = get_pred_stats(v0_, gt_class, pred_logit)
+                    v_= create_new_video(video, clustered_ids)
+                    r_ = get_pred_stats(v_, gt_class, pred_logit)
+                    pair_analysis['selected_pairs_logit'] = r_['logit']
 
-                    pairs = get_motion_pairs(clustered_ids)
+                    pairs = func.get_motion_pairs(clustered_ids)
                     pairs.insert(0,(None,None))
                     vals = list(clustered_ids.keys())
 

@@ -305,9 +305,11 @@ function to modify video
 '''
 
 #video: 3, t , h , w
-def create_new_video(video, ordered_keys, frame_cluster_idxs):
+def create_new_video(video, frame_cluster_idxs, ordered_keys=None):
     new_video = torch.zeros_like(video)
     cur_idx=0
+    if ordered_keys == None:
+        ordered_keys = frame_cluster_idxs.keys()
     for k in ordered_keys:
         for f in frame_cluster_idxs[k]:
             new_video[:,cur_idx,:] = video[:,f,:]
@@ -319,11 +321,18 @@ def replace_frame(video, ordered_keys, frame_cluster_idxs, key, img):
     cur_idx=0
     for k in ordered_keys:
         for f in frame_cluster_idxs[k]:
-            if f==key:
+            if str(f)==str(key):
                 new_video[:,cur_idx,:] = img    
             cur_idx += 1
     return new_video
 
+def get_motion_pairs(ids):
+    pairs = []
+    keys = list(ids.keys())
+    for idx in range(len(keys)-1):
+        pairs.append((keys[idx], keys[idx+1]))
+
+    return pairs
 
 import numpy as np
 import torch

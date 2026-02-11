@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import numpy as np
 import cv2
+import os
 
 #create model and data loader
 ucf101dm = func.UCF101_data_model()
@@ -64,28 +65,44 @@ def spacial_analysis(video, frame_pairs):
     ret = gmodel.calc_flow_saliency(input, frame_pairs, grad_method='gradcam')
     return ret
 
-def spacial_analysis_perturb(video, frame_pairs, gt_class_idx, pred_logit, ordered_keys, clustered_ids):
+def spacial_analysis_perturb(video, gt_class_idx, pred_logit, ordered_keys, clustered_ids):
 
     #get gradcam mask for the input video
     GCAM_THR = 0.2
     gcam = gmodel.calc_gradcam(video[None,:].to('cuda'))
     gcam_mask = (gcam > GCAM_THR).int()
     # func.show_gray_image(gcam_mask[0,4,:].detach().cpu().numpy())
+    pairs = func.get_motion_pairs(clustered_ids)
 
     heatmaps = []
-    for p in frame_pairs:
-        img1 = video[:,p[0],:][None,:]
-        img2 = video[:,p[1],:][None,:]
+    for p in pairs:
+        p_ind = {}
+        ind = 0
+        for k in clustered_ids:
+            val = clustered_ids[k]
+            ind_ar = []
+            for i in range(len(val)):
+                ind_ar.append(ind)
+                ind+=1
+            p_ind[k] = ind_ar
+
+        p0 = p_ind[str(p[0])][0]
+        p1 = p_ind[str(p[1])][0]
+
+        img1 = video[:,p0,:][None,:]
+        img2 = video[:,p1,:][None,:]
         flow = raftof.predict_flow_batch(img2, img1)
         flow = raftof.resize_flow_interpolate(flow)
         flow_mag = torch.sum(flow**2, dim=1)**0.5
         # threshold = flow_mag.mean() + flow_mag.std()
         threshold = 0.5
         flow_mask = (flow_mag > threshold).int()
-
-        mask = gcam_mask[0,p[0],:] * flow_mask
-
         # func.show_gray_image(flow_mask[0,:].detach().cpu().numpy())
+        # func.show_rgb_image(img1[0,:].permute(1,2,0).detach().cpu().numpy())
+
+        mask = gcam_mask[0,clustered_ids[str(p[0])][0],:] * flow_mask
+
+        # func.show_gray_image(mask[0,:].detach().cpu().numpy())
         # func.show_rgb_image(img1[0,:].permute(1,2,0).detach().cpu().numpy())
         # v = torch.cat((img1,img2), dim=0)
         # func.play_tensor_video_opencv(v,fps=2)
@@ -126,6 +143,7 @@ def spacial_analysis_perturb(video, frame_pairs, gt_class_idx, pred_logit, order
         final_img = cv2.cvtColor(final_img, cv2.COLOR_RGB2BGR)
         heatmaps.append(final_img)
         # cv2.imwrite('output_opencv.jpg', final_img)
+        # func.show_rgb_image(final_img)
     return heatmaps
 
 
@@ -181,7 +199,7 @@ def modify_flow(img1, img2, flow, mask):
 
 
 # func.show_gray_image(mask_mask.float().cpu().numpy())
-import os
+
 
 def go_through_samples():
     img_out_path = r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance_imgs'
@@ -210,14 +228,10 @@ def go_through_samples():
             clustered_ids = d['pair_analysis']['clustered_ids']
             pair_importance = d['pair_analysis']['pair_importance'] # this is percentage change. lower, better
             # for pi in pair_importance:
-            #     print(f'{pi[0]}: {pi[1]}')
-
-            
+            #     print(f'{pi[0]}: {pi[1]}')  
 
             if pair_importance[0][0] == [None,None]:
-                if pair_importance[0][1] < THR:
-                    print('Motion is not important for this video')
-                    continue
+                pass
 
             g = k.split('_')[2][1:]
             c = k.split('_')[3][1:]
@@ -225,40 +239,18 @@ def go_through_samples():
             vid_path = ucf101dm.construct_vid_path(cls_name,g,c)
             video = ucf101dm.load_jpg_ucf101(vid_path,n=0)
             pairs = [pi[0] for pi in pair_importance if pi[0]!=[None,None]]
-            frame_pairs = [(clustered_ids[str(p[0])][-1],clustered_ids[str(p[1])][0]) for p in pairs]
             ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
 
-            video = func.create_new_video(video.permute(1,0,2,3), ordered_keys, clustered_ids)
-            heatmaps = spacial_analysis_perturb(video, frame_pairs, gt_class_idx, d['pair_analysis']['new_logit'], ordered_keys, clustered_ids)
+            video_ = func.create_new_video(video.permute(1,0,2,3), clustered_ids, ordered_keys)
+            heatmaps = spacial_analysis_perturb(video_, gt_class_idx, d['pair_analysis']['all_imp_pairs_logit'], ordered_keys, clustered_ids)
 
-            # img1 = video[:,0,:].permute(1,2,0).detach().cpu().numpy()
-            # img2 = video[:,1,:].permute(1,2,0).detach().cpu().numpy()
-            # v = np.concatenate((img1[None,:], img2[None,:]), axis=0)
-            # func.play_tensor_video_opencv(v,fps=1)
-
-
-
-
-
-
-            from pathlib import Path
-            sub_dir = os.path.join(img_out_path, gt_class)
+            sub_dir = os.path.join(img_out_path, gt_class, k)
             os.makedirs(sub_dir, exist_ok=True)
-            int_names = [int(file.name.split('_')[0]) for file in Path(sub_dir).iterdir() if file.is_file()]
-            if len(int_names) == 0:
-                next_file = '0'
-            else:
-                next_file = str(max(int_names)+1)
 
             for i, hm in enumerate(heatmaps):
-                p = frame_pairs[i]
-                out_path = os.path.join(sub_dir, f'{next_file}_{p[0]}_{p[1]}.jpg')
+                p = pairs[i]
+                out_path = os.path.join(sub_dir, f'{p[0]}_{p[1]}.jpg')
                 cv2.imwrite(out_path, hm)
-
-
-
-            
-            pass
 
 
 
