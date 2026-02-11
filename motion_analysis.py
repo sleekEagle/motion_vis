@@ -120,7 +120,7 @@ def replace_cluster(clustered_ids, source_key, dest_key):
     new_key = clustered_ids[source_key][0]
     if new_key!=dest_key:
         ids[new_key] = ids.pop(dest_key)
-        ids = dict(sorted(ids.items(), key=lambda x:x[1][0]))
+    ids = dict(sorted(ids.items(), key=lambda x:x[1][0]))
     return ids
 
 '''
@@ -239,6 +239,7 @@ def get_uniqueval_indices(ids):
 '''
 ApplyLipstick
 pred_orig_logit = 0.8397961854934692
+0.854
 '''
 
 def motion_importance_dataset():
@@ -278,7 +279,7 @@ def motion_importance_dataset():
             sorted_indices = [i for i, _ in sorted(enumerate(all_logits), key=lambda x: x[1], reverse=True)]
             file_analysis['sorted_importance_frame_idx'] = sorted_indices
 
-            prev_logit = 0
+            # prev_logit = 0
             used_values = [sorted_indices[0]]                
             for i in range(1, len(sorted_indices)):
                 new_idx = sorted_indices[i]
@@ -287,42 +288,33 @@ def motion_importance_dataset():
                 ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
                 video_ = create_new_video(video, clustered_ids, ordered_keys)
                 ret = get_pred_stats(video_, gt_class, pred_logit)
-
-                logit_increase = ret['logit'] - prev_logit
-
+                # logit_increase = ret['logit'] - prev_logit
                 # if logit_increase < 0:
                 #     continue
-                
-                prev_logit = ret['logit']
+                # prev_logit = ret['logit']
                 used_values.append(new_idx)
-
                 percent_change_ = (pred_logit - ret['logit'])/pred_logit
 
                 if percent_change_ <= change_threshold: #the video can be explained well (enough) just with the given set of frames
                     found_sol = True
                     pair_analysis = {}
-                    pair_analysis['new_logit'] = ret['logit']
-                    pair_analysis['percent_change_'] = percent_change_
+                    pair_analysis['all_imp_pairs_logit'] = ret['logit']
+                    pair_analysis['all_imp_pairs_per_change'] = percent_change_
 
                     #check if the motion among the frames are important for this prediction
                     clustered_ids = dict(sorted(clustered_ids.items(), key=lambda x:x[1][0]))
                     pairs = get_motion_pairs(clustered_ids)
 
-                    # v = create_new_video(video_, ordered_keys, clustered_ids)
-                    # r = get_pred_stats(v, gt_class, pred_logit)
-
                     # check if there are adjecent frames with insignificant motion
                     # if there are any get rid of these pairs
-                    for p in pairs:
-                        pairs_ = get_motion_pairs(clustered_ids)
-                        if p not in pairs_:
-                            continue
+                    
+                    p = pairs[0]
+                    used_pairs = []
+                    while(p != -1):
                         c0 = replace_cluster(clustered_ids, p[0], p[1])
                         v0 = create_new_video(video, c0)
                         c1 = replace_cluster(clustered_ids, p[1], p[0])
                         v1 = create_new_video(video, c1)
-
-                        # (v1[:,15,:,:] == video[:,15,:, :]).all()
 
                         r0 = get_pred_stats(v0, gt_class, pred_logit)
                         r1 = get_pred_stats(v1, gt_class, pred_logit)
@@ -334,6 +326,9 @@ def motion_importance_dataset():
                                 clustered_ids = c1
                             else:
                                 clustered_ids = c0
+                        used_pairs.append(p)
+                        pairs = get_motion_pairs(clustered_ids)
+                        p = next(filter(lambda p: p not in used_pairs, pairs), -1)
 
                     # v0_= create_new_video(video, clustered_ids)
                     # r_ = get_pred_stats(v0_, gt_class, pred_logit)
@@ -342,12 +337,12 @@ def motion_importance_dataset():
                     pairs.insert(0,(None,None))
                     vals = list(clustered_ids.keys())
 
-                    pair_imp = []
+                    pair_per_change = []
                     if len(pairs)==2:
                         pair = pairs[1]
                         v_ = create_new_video(video, clustered_ids, (pair[1], pair[0]))
                         r_ = get_pred_stats(v_, gt_class, pred_logit)
-                        pair_imp.append((pair, r_['per_change']))
+                        pair_per_change.append((pair, r_['per_change']))
                     else:
                         for pair in pairs:
                             vals_ = vals.copy()
@@ -370,11 +365,11 @@ def motion_importance_dataset():
                             # print('check complete')
 
                             avg_pred = get_avg_pred(video, clustered_ids, combinations)
-                            comb_logit = avg_pred[:,gt_class].item()
-                            comb_per_change = (pred_logit-comb_logit)/pred_logit
-                            pair_imp.append((pair, comb_per_change))
+                            avg_logit = avg_pred[:,gt_class].item()
+                            avg_per_change = (pred_logit-avg_logit)/pred_logit
+                            pair_per_change.append((pair, avg_per_change))
 
-                    pair_analysis['pair_importance'] = pair_imp
+                    pair_analysis['pair_importance'] = pair_per_change
                     pair_analysis['clustered_ids'] = clustered_ids
                     file_analysis['pair_analysis'] = pair_analysis
 
