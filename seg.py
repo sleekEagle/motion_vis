@@ -65,18 +65,17 @@ if __name__ == '__main__':
 
     # func.show_gray_image(object_masks[3])
     # func.show_gray_image(result.detach().cpu().numpy())
-    def get_mask_grid(mask, stride=3):
+    def get_mask_xy(mask, stride=3):
         H,W = mask.shape
         stride = 3
         grid = torch.zeros((H,W))
         grid[::stride,::stride] = 1
         grid[::stride,::stride] = 1
-        return grid*mask
+        return torch.nonzero(grid*mask)
 
-
-    g = get_mask_grid(object_masks[3])
+    # mxy = get_mask_xy(object_masks[3])
     
-    func.show_gray_image(g.detach().cpu().numpy())
+    # func.show_gray_image(g.detach().cpu().numpy())
 
 
     model = Sam2VideoModel.from_pretrained("facebook/sam2.1-hiera-tiny").to('cuda', dtype=torch.bfloat16)
@@ -92,26 +91,25 @@ if __name__ == '__main__':
         dtype=torch.bfloat16,
     )
     inference_session.reset_inference_session()
-
-    # Add multiple objects on the first frame
-    ann_frame_idx = 0
-    obj_ids = [2, 3]
-    input_points = [[[[200, 300]], [[400, 150]]]]  # Points for two objects (batched)
-    input_labels = [[[1], [1]]]
+    
+    mask = object_masks[3]
+    mask_tensor = torch.tensor(mask, dtype=torch.float32)
+    mask_tensor = mask_tensor.unsqueeze(0).unsqueeze(0)
 
     processor.add_inputs_to_inference_session(
         inference_session=inference_session,
-        frame_idx=ann_frame_idx,
-        obj_ids=obj_ids,
-        input_points=input_points,
-        input_labels=input_labels,
+        frame_idx=0,
+        obj_ids=[1],  # list of object IDs
+        input_masks=mask_tensor.to('cuda'),
     )
 
-    # Get masks for both objects on first frame
-    outputs = model(
-        inference_session=inference_session,
-        frame_idx=ann_frame_idx,
-    )
+    video_segments = {}
+    for sam2_video_output in model.propagate_in_video_iterator(inference_session):
+        video_res_masks = processor.post_process_masks(
+            [sam2_video_output.pred_masks], original_sizes=[[inference_session.video_height, inference_session.video_width]], binarize=False
+        )[0]
+        video_segments[sam2_video_output.frame_idx] = video_res_masks
+
 
 
 
