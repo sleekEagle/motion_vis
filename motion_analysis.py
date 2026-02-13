@@ -234,7 +234,7 @@ accuracy = 0.854
 
 def motion_importance_dataset():
     output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance.json')
-    change_threshold = 0.05
+    change_threshold = 0.02
     anlysis_data = {}
     n_samples, n_correct = 0, 0
     for idx, batch in enumerate(inference_loader):
@@ -245,7 +245,8 @@ def motion_importance_dataset():
         video = inputs[0].to('cuda')
         gt_class_name = targets[0][0].split('_')[1]
         file_name = targets[0][0]
-        # if file_name != 'v_ApplyLipstick_g03_c03':
+
+        # if file_name!='v_ApplyEyeMakeup_g04_c03':
         #     continue
 
         seq = targets[0][1]
@@ -297,6 +298,17 @@ def motion_importance_dataset():
 
                     # check if there are adjecent frames with insignificant motion
                     # if there are any get rid of these pairs
+
+                    # p = pairs[0]
+                    # img1 = video[:,3,:].permute(1,2,0)
+                    # img2 = video[:,12,:].permute(1,2,0)
+                    # v = torch.cat((img1[None,:],img2[None,:]), dim=0)
+                    # func.play_tensor_video_opencv(v,fps=1)
+
+                    # func.play_tensor_video_opencv(v_.permute(1,2,3,0),fps=2)
+
+                    v_ = create_new_video(video, clustered_ids)
+                    r_ = get_pred_stats(v_, gt_class, pred_logit)
                     
                     p = pairs[0]
                     used_pairs = []
@@ -306,12 +318,12 @@ def motion_importance_dataset():
                         c1 = replace_cluster(clustered_ids, p[1], p[0])
                         v1 = create_new_video(video, c1)
 
-                        r0 = get_pred_stats(v0, gt_class, pred_logit)
-                        r1 = get_pred_stats(v1, gt_class, pred_logit)
+                        r0 = get_pred_stats(v0, gt_class, ret['pred_logit'])
+                        r1 = get_pred_stats(v1, gt_class, ret['pred_logit'])
 
                         maxlog = max(r0['logit'],r1['logit'])
-                        pc = (pred_logit - maxlog)/pred_logit
-                        if pc <= change_threshold:
+                        pc = (ret['pred_logit'] - maxlog)/ret['pred_logit']
+                        if pc <= 0.005:
                             if r0['logit']<r1['logit']:
                                 clustered_ids = c1
                             else:
@@ -376,6 +388,19 @@ def motion_importance_dataset():
 
         n_samples += 1
 
+
+        # clustered_ids = pair_analysis['clustered_ids']
+        # pairs = func.get_motion_pairs(clustered_ids)
+        # for p in pairs:
+        #     p0 = clustered_ids[p[0]][0]
+        #     p1 = clustered_ids[p[1]][0]
+        #     img0 = video[:,p0,:].permute(1,2,0)
+        #     img1 = video[:,p1,:].permute(1,2,0)
+        #     v = torch.cat((img0[None,:],img1[None,:]), dim=0)
+        #     func.play_tensor_video_opencv(v,fps=1)
+
+
+
     accuracy = n_correct / n_samples
     print(f'Overall accuracy: {accuracy:.3f}')
     anlysis_data['accuracy'] = accuracy
@@ -388,6 +413,7 @@ def motion_importance_dataset():
 #**************************************************************************************
 
 def create_new_video(video, frame_cluster_idxs, ordered_keys=None):
+
     new_video = torch.zeros_like(video)
     cur_idx=0
     if ordered_keys == None:

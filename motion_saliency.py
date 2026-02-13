@@ -76,6 +76,7 @@ def spacial_analysis_perturb(video, gt_class_idx, pred_logit, ordered_keys, clus
 
     heatmaps = []
     for p in pairs:
+        out_dict = {}
         p_ind = {}
         ind = 0
         for k in clustered_ids:
@@ -94,19 +95,46 @@ def spacial_analysis_perturb(video, gt_class_idx, pred_logit, ordered_keys, clus
         flow = raftof.predict_flow_batch(img2, img1)
         flow = raftof.resize_flow_interpolate(flow)
         flow_mag = torch.sum(flow**2, dim=1)**0.5
-        # threshold = flow_mag.mean() + flow_mag.std()
-        threshold = 0.5
-        flow_mask = (flow_mag > threshold).int()
-        # func.show_gray_image(flow_mask[0,:].detach().cpu().numpy())
+
+
+        out_dict['flow_mag'] = flow_mag[0,:].detach().cpu().numpy()
+        #check if this pair has sufficient motion
+
+        # v = torch.cat((img1,img2), dim=0)
+        # v = F.interpolate(v, size=(512,512), mode='bilinear', align_corners=False)
+
+        # func.play_tensor_video_opencv(v.permute(0,2,3,1),fps=1)
+
+
+        # threshold = flow_mag.mean()
+        # flow_mask = (flow_mag > threshold).int()
+        # out_dict['flow_mask'] = flow_mask[0,:].detach().cpu().numpy()
+        # flow_mask = torch.ones_like(flow_mask)
+        # func.show_gray_image(mask[0,:].detach().cpu().numpy())
+        # func.show_gray_image(flow_mag[0,:].detach().cpu().numpy())
+
         # func.show_rgb_image(img1[0,:].permute(1,2,0).detach().cpu().numpy())
 
-        mask = gcam_mask[0,clustered_ids[str(p[0])][0],:] * flow_mask
+        # mask = gcam_mask[0,clustered_ids[str(p[0])][0],:] * flow_mask
+        gc = gcam[0,clustered_ids[str(p[0])][0],:]
+        out_dict['gcam'] = gc.detach().cpu().numpy()
+        # out_dict['gcam_mask'] = gcam_mask[0,clustered_ids[str(p[0])][0],:].detach().cpu().numpy()
+        # out_dict['mask'] = mask[0,:].detach().cpu().numpy()
+        # mask_perc = torch.nonzero(mask).size(0)/(mask.size(1)*mask.size(2))
+        # assert mask_perc>=0.05, "Not enough pixels display significant motion"
 
-        # func.show_gray_image(mask[0,:].detach().cpu().numpy())
+        mask = flow_mag[0,:]*gc
+        v = mask>mask.mean()
+        mask[v] = 1
+        mask[~v] = 0
+        out_dict['mask'] = mask.detach().cpu().numpy()
+
+        # func.show_gray_image(mask.detach().cpu().numpy())
+
+        # func.show_gray_image(gcam_mask[0,clustered_ids[str(p[0])][0],:].detach().cpu().numpy())
         # func.show_rgb_image(img1[0,:].permute(1,2,0).detach().cpu().numpy())
         # v = torch.cat((img1,img2), dim=0)
-        # func.play_tensor_video_opencv(v,fps=2)
-
+        # func.play_tensor_video_opencv(v,fps=1)
 
         ret = modify_flow(img1, img2, flow, mask)
         warped = ret['warped']
@@ -141,7 +169,8 @@ def spacial_analysis_perturb(video, gt_class_idx, pred_logit, ordered_keys, clus
 
         final_img = cv2.addWeighted(img, 0.6, h_col, 0.4, 0)
         final_img = cv2.cvtColor(final_img, cv2.COLOR_RGB2BGR)
-        heatmaps.append(final_img)
+        out_dict['heatmap'] = final_img
+        heatmaps.append(out_dict)
         # cv2.imwrite('output_opencv.jpg', final_img)
         # func.show_rgb_image(final_img)
     return heatmaps
@@ -207,9 +236,12 @@ def go_through_samples():
     with open(path, 'r', encoding='utf-8') as file:
         data_dict = json.load(file)
 
-    for k in data_dict:
-        d = data_dict[k]
+    for i, k in enumerate(data_dict):
+        print(f'Processing sample {i+1}/{len(data_dict)}: {k}', end='\r')
 
+        d = data_dict[k]
+        # if k!='v_ApplyEyeMakeup_g04_c03':
+        #     continue
         #consider only samples that are correcly predicted
         gt_class = d['motion_importance']['gt_class']
         gt_class_idx = class_labels[gt_class.lower()]
@@ -230,8 +262,16 @@ def go_through_samples():
             # for pi in pair_importance:
             #     print(f'{pi[0]}: {pi[1]}')  
 
-            if pair_importance[0][0] == [None,None]:
-                pass
+            none_imp = None
+            if len(pair_importance)==1:
+                none_imp = pair_importance[0][1]
+            elif pair_importance[0][0] == [None,None]:
+                none_imp = pair_importance[0][1]
+            assert none_imp is not None, "Error! None importance is not calculated for this sample"
+            non_per_change = (pred_logit - none_imp)/pred_logit
+            if non_per_change < 0.02:#motion is not important for this sample
+                print('Motion is not important for this sample')
+                continue
 
             g = k.split('_')[2][1:]
             c = k.split('_')[3][1:]
@@ -247,13 +287,39 @@ def go_through_samples():
             sub_dir = os.path.join(img_out_path, gt_class, k)
             os.makedirs(sub_dir, exist_ok=True)
 
-            for i, hm in enumerate(heatmaps):
+            for i in range(len(heatmaps)):
                 p = pairs[i]
-                out_path = os.path.join(sub_dir, f'{p[0]}_{p[1]}.jpg')
+
+                hm = heatmaps[i]['heatmap']
+                out_path = os.path.join(sub_dir, f'hm_{p[0]}_{p[1]}.jpg')
                 cv2.imwrite(out_path, hm)
 
+                gcam = heatmaps[i]['gcam']
+                gcam = np.uint8(gcam*255)
+                out_path = os.path.join(sub_dir, f'gcam_{p[0]}_{p[1]}.jpg')
+                cv2.imwrite(out_path, gcam)
 
+                f = heatmaps[i]['flow_mag']
+                f = np.uint8((f - f.min())/(f.max()-f.min()+1e-5)*255)
+                out_path = os.path.join(sub_dir, f'fmag_{p[0]}_{p[1]}.jpg')
+                cv2.imwrite(out_path, f)
 
+                # fm = heatmaps[i]['flow_mask']
+                # fm = np.uint8(fm*255)
+                # out_path = os.path.join(sub_dir, f'fmask_{p[0]}_{p[1]}.jpg')
+                # cv2.imwrite(out_path, fm)
+
+                m = heatmaps[i]['mask']
+                m = np.uint8(m*255)
+                out_path = os.path.join(sub_dir, f'mask_{p[0]}_{p[1]}.jpg')
+                cv2.imwrite(out_path, m)
+
+                # gm = heatmaps[i]['gcam_mask']
+                # gm = np.uint8(gm*255)
+                # out_path = os.path.join(sub_dir, f'gmask_{p[0]}_{p[1]}.jpg')
+                # cv2.imwrite(out_path, gm)
+
+            
 if __name__ == '__main__':
     go_through_samples()
 
