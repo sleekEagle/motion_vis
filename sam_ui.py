@@ -330,10 +330,10 @@ class Seg_UI:
             func.play_tensor_video_opencv(v[...,::-1], fps=2, titles=list(range(v.shape[0])))
 
 # img_path = r'C:\Users\lahir\Downloads\UCF101\jpgs\Basketball\v_Basketball_g12_c01\image_00263.jpg'
-vid_path = r'C:\Users\lahir\Downloads\UCF101\jpgs\Archery\v_Archery_g25_c05'
+vid_path = r'C:\Users\lahir\Downloads\UCF101\jpgs\Biking\v_Biking_g24_c03'
 
 def get_masks_from_ui(vid_path):
-    segui = Seg_UI(vid_path, annot_frame=12)
+    segui = Seg_UI(vid_path, annot_frame=0)
     segui.display_frame()
     while not segui.done:
         segui.display_frame()
