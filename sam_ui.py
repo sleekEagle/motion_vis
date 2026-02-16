@@ -6,6 +6,12 @@ import torch
 import matplotlib.pyplot as plt
 from PIL import Image
 import cv2
+from sam2.build_sam import build_sam2
+from sam2.sam2_image_predictor import SAM2ImagePredictor
+from sam2.build_sam import build_sam2_video_predictor
+
+import matplotlib.cm as cm
+import matplotlib.colors as mcolors
 
 # select the device for computation
 if torch.cuda.is_available():
@@ -97,13 +103,6 @@ def show_masks(image, masks, scores, point_coords=None, box_coords=None, input_l
         plt.axis('off')
         plt.show()
 
-
-from sam2.build_sam import build_sam2
-from sam2.sam2_image_predictor import SAM2ImagePredictor
-
-import matplotlib.cm as cm
-import matplotlib.colors as mcolors
-
 def generate_distinct_colors_matplotlib(n_colors, colormap='tab20'):
     """
     Generate distinct colors using matplotlib colormaps
@@ -129,11 +128,14 @@ def generate_distinct_colors_matplotlib(n_colors, colormap='tab20'):
     
     return colors
 
+from pathlib import Path
+BASE_DIR = Path(__file__).parent
+
 class Seg_UI:
     def __init__(self, prev_masks=None):
         self.prev_masks = prev_masks
-        sam2_checkpoint = r"C:\Users\lahir\code\motion_vis\sam2\checkpoints\sam2.1_hiera_large.pt"
-        model_cfg = "configs/sam2.1/sam2.1_hiera_l.yaml"
+        sam2_checkpoint = os.path.join(BASE_DIR, "checkpoints" , "sam2.1_hiera_large.pt")
+        model_cfg = os.path.join(BASE_DIR , "checkpoints" ,"sam2.1_hiera_l.yaml")
 
         sam2_model = build_sam2(model_cfg, sam2_checkpoint, device=device)
         self.predictor = SAM2ImagePredictor(sam2_model)
@@ -280,22 +282,36 @@ class Seg_UI:
 
         cv2.destroyAllWindows()
 
+img_path = r'C:\Users\lahir\Downloads\UCF101\jpgs\Basketball\v_Basketball_g12_c01\image_00263.jpg'
+
+def get_masks_from_ui(img_path):
+    prev_masks = []
+    while True:
+        if len(prev_masks) == 0:
+            segui = Seg_UI()
+        else:
+            segui = Seg_UI(prev_masks=prev_masks)
+        segui.ui_image(img_path)
+        if type(segui.current_mask)==np.ndarray:
+            prev_masks.append(segui.current_mask)
+        if segui.done:
+            break
+    return prev_masks
+
+# get_masks_from_ui(img_path)
+vid_path = r'C:\\Users\\lahir\\Downloads\\UCF101\\jpgs\\Basketball\\v_Basketball_g12_c01\\'
 
 
+class Vid_Seg_UI:
+    def __init__(self, prev_masks=None):
+        self.prev_masks = prev_masks
+        sam2_checkpoint = os.path.join(BASE_DIR, "checkpoints" , "sam2.1_hiera_large.pt")
+        model_cfg = os.path.join(BASE_DIR , "checkpoints" ,"sam2.1_hiera_l.yaml")
+        self.predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device=device)
+        inference_state = self.vpredictor.init_state(video_path=vid_path,n_frames=16, start_idx=0)
+        self.predictor.reset_state(inference_state)
+        pass
 
-img_path = r'C:\Users\lahir\code\motion_vis\sam2\notebooks\images\truck.jpg'
-
-prev_masks = []
-while True:
-    if len(prev_masks) == 0:
-        segui = Seg_UI()
-    else:
-        segui = Seg_UI(prev_masks=prev_masks)
-    segui.ui_image(img_path)
-    if type(segui.current_mask)==np.ndarray:
-        prev_masks.append(segui.current_mask)
-    if segui.done:
-        break
-pass
+segui = Vid_Seg_UI()
 
 
