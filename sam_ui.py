@@ -129,16 +129,21 @@ def generate_distinct_colors_matplotlib(n_colors, colormap='tab20'):
     return colors
 
 from pathlib import Path
+import glob
 BASE_DIR = Path(__file__).parent
 
 class Seg_UI:
-    def __init__(self, prev_masks=None):
-        self.prev_masks = prev_masks
+    def __init__(self, vid_path ,n_frames=16, start_idx=0):
         sam2_checkpoint = os.path.join(BASE_DIR, "checkpoints" , "sam2.1_hiera_large.pt")
         model_cfg = os.path.join(BASE_DIR , "checkpoints" ,"sam2.1_hiera_l.yaml")
+        self.predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device=device)
+        self.inference_state = self.predictor.init_state(video_path=vid_path,n_frames=n_frames, start_idx=0)
+        self.predictor.reset_state(self.inference_state)
 
-        sam2_model = build_sam2(model_cfg, sam2_checkpoint, device=device)
-        self.predictor = SAM2ImagePredictor(sam2_model)
+        #get all file paths
+        self.files = glob.glob(f'{vid_path}\\*.jpg')
+        self.files.sort(key=lambda p: int(os.path.splitext(p)[0].split('_')[-1]))
+        self.files = self.files[start_idx : start_idx + n_frames]  # only take the first 16 frames for now
 
         self.positive_pts = np.empty((0, 2))
         self.positive_lbls = np.empty((0))
@@ -155,30 +160,43 @@ class Seg_UI:
         self.mask_overlay_alpha = 0.5  # Transparency for mask overlay
         self.done = False
 
+        self.prev_masks = []
+        self.object_id = 0
+
     def mouse_callback(self, event, x, y, flags, param):
         clicked = False
-        if event == cv2.EVENT_LBUTTONDOWN:
-            clicked = True
-            self.positive_pts = np.append(self.positive_pts, np.array([[x,y]]), axis=0)
-            self.positive_lbls = np.append(self.positive_lbls, np.array([1]),axis=0)
-            
         if event == cv2.EVENT_RBUTTONDOWN:
             clicked = True
             self.negative_pts = np.append(self.negative_pts, np.array([[x,y]]), axis=0)
             self.negative_lbls = np.append(self.negative_lbls, np.array([0]),axis=0)
+            
+        if event == cv2.EVENT_LBUTTONDOWN:
+            clicked = True
+            self.positive_pts = np.append(self.positive_pts, np.array([[x,y]]), axis=0)
+            self.positive_lbls = np.append(self.positive_lbls, np.array([1]),axis=0)
         
         if clicked:
             input_point = np.append(self.positive_pts, self.negative_pts, axis=0)
             input_label = np.append(self.positive_lbls, self.negative_lbls, axis=0)
 
-            masks, scores, _ = self.predictor.predict(
-                point_coords=input_point,
-                point_labels=input_label,
-                multimask_output=False,
+            # masks, scores, _ = self.predictor.predict(
+            #     point_coords=input_point,
+            #     point_labels=input_label,
+            #     multimask_output=False,
+            # )
+
+            # self.predictor.reset_state(self.inference_state)
+            _, out_obj_ids, out_mask_logits = self.predictor.add_new_points_or_box(
+                inference_state=self.inference_state,
+                frame_idx=0,
+                obj_id=self.object_id,
+                points=input_point,
+                labels=input_label,
             )
-            m = masks>0
+            
+            m = out_mask_logits[self.object_id,:]>0
             if len(m) > 0:
-                self.current_mask = m[0]
+                self.current_mask = m[0].cpu().numpy()
                 self.update_display(input_point, input_label)
 
     def overlay_mask(self, image, mask, color=(0, 255, 0), alpha=0.5):
@@ -245,7 +263,7 @@ class Seg_UI:
         self.display_image = display
         cv2.imshow(self.window_name, display)
 
-    def add_masks(self, image, masks):
+    def paint_masks(self, image, masks):
         n_col = len(masks)+1
         colors = generate_distinct_colors_matplotlib(n_col)
 
@@ -256,18 +274,17 @@ class Seg_UI:
         
         # show_masks(image, masks, scores, point_coords=input_point, input_labels=input_label)
 
-    def ui_image(self, img_path):
-        image = cv2.imread(img_path)
-        if self.prev_masks is not None:
-            image = self.add_masks(image, self.prev_masks)
+    def display_frame(self):
+        image = cv2.imread(self.files[0])
+        if len(self.prev_masks)>0:
+            image = self.paint_masks(image, self.prev_masks)
         self.original_image = image
-        self.predictor.set_image(image)
+
         window_name = "Select Objects"
         cv2.namedWindow(window_name)
         cv2.setMouseCallback(window_name, self.mouse_callback)
         cv2.imshow(window_name, image)
-        # cv2.waitKey(0)
-        # cv2.destroyAllWindows()
+
         while True:
             # Wait for key press (1 ms delay)
             key = cv2.waitKey(1) & 0xFF
@@ -275,43 +292,80 @@ class Seg_UI:
             # Check for specific keys
             if key == ord('q'):  # Press 'q' to quit
                 print("Quitting...")
+                self.prev_masks.append(self.current_mask)
+                self.object_id += 1
+
+                self.positive_pts = np.empty((0, 2))
+                self.positive_lbls = np.empty((0))
+                self.negative_pts = np.empty((0, 2))
+                self.negative_lbls = np.empty((0))
+                
                 break
             elif key == ord('s'):  # Press 's' to save
                 self.done = True
+                self.prev_masks.append(self.current_mask)
+                break
+            elif key == ord('r'):  # Press 'r' to reset
+                print("Resetting...")
+                self.positive_pts = np.empty((0, 2))
+                self.positive_lbls = np.empty((0))
+                self.negative_pts = np.empty((0, 2))
+                self.negative_lbls = np.empty((0))
                 break
 
         cv2.destroyAllWindows()
-
-img_path = r'C:\Users\lahir\Downloads\UCF101\jpgs\Basketball\v_Basketball_g12_c01\image_00263.jpg'
-
-def get_masks_from_ui(img_path):
-    prev_masks = []
-    while True:
-        if len(prev_masks) == 0:
-            segui = Seg_UI()
-        else:
-            segui = Seg_UI(prev_masks=prev_masks)
-        segui.ui_image(img_path)
-        if type(segui.current_mask)==np.ndarray:
-            prev_masks.append(segui.current_mask)
-        if segui.done:
-            break
-    return prev_masks
-
-# get_masks_from_ui(img_path)
-vid_path = r'C:\\Users\\lahir\\Downloads\\UCF101\\jpgs\\Basketball\\v_Basketball_g12_c01\\'
+    
+    def propagate_video(self):
+        video_segments = {} 
+        for out_frame_idx, out_obj_ids, out_mask_logits in self.predictor.propagate_in_video(self.inference_state):
+            video_segments[out_frame_idx] = {
+            out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
+            for i, out_obj_id in enumerate(out_obj_ids)
+        }
 
 
-class Vid_Seg_UI:
-    def __init__(self, prev_masks=None):
-        self.prev_masks = prev_masks
-        sam2_checkpoint = os.path.join(BASE_DIR, "checkpoints" , "sam2.1_hiera_large.pt")
-        model_cfg = os.path.join(BASE_DIR , "checkpoints" ,"sam2.1_hiera_l.yaml")
-        self.predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device=device)
-        inference_state = self.vpredictor.init_state(video_path=vid_path,n_frames=16, start_idx=0)
-        self.predictor.reset_state(inference_state)
+        colors = generate_distinct_colors_matplotlib(self.object_id+1)
+        vis_frame_stride = 1
+        for out_frame_idx in range(0, len(self.files), vis_frame_stride):
+            img = cv2.imread(self.files[out_frame_idx])
+            for out_obj_id, out_mask in video_segments[out_frame_idx].items():
+                img = self.overlay_mask(img, out_mask[0], color=colors[out_obj_id])
+
         pass
 
-segui = Vid_Seg_UI()
+# img_path = r'C:\Users\lahir\Downloads\UCF101\jpgs\Basketball\v_Basketball_g12_c01\image_00263.jpg'
+vid_path = r'C:\\Users\\lahir\\Downloads\\UCF101\\jpgs\\Basketball\\v_Basketball_g12_c01\\'
+
+def get_masks_from_ui(vid_path):
+    segui = Seg_UI(vid_path)
+    segui.display_frame()
+    
+    while True:
+        segui.display_frame()
+        if segui.done:
+            break
+
+    #propagete masks through the video
+    pass
+    segui.propagate_video()
+    pass
+
+get_masks_from_ui(vid_path)
+
+
+
+# class Vid_Seg_UI:
+#     def __init__(self, prev_masks=None):
+#         self.prev_masks = prev_masks
+#         sam2_checkpoint = os.path.join(BASE_DIR, "checkpoints" , "sam2.1_hiera_large.pt")
+#         model_cfg = os.path.join(BASE_DIR , "checkpoints" ,"sam2.1_hiera_l.yaml")
+#         self.predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device=device)
+#         inference_state = self.predictor.init_state(video_path=vid_path,n_frames=16, start_idx=0)
+#         self.predictor.reset_state(inference_state)
+
+
+#         pass
+
+# segui = Vid_Seg_UI()
 
 
