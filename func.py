@@ -115,7 +115,7 @@ def normalize_to_neg1_pos1(tensor):
 '''
 input video should be tensor of shape [T, 3, H, W]
 '''
-def play_tensor_video_opencv(tensor, fps=30, window_name="Tensor Video"):
+def play_tensor_video_opencv(tensor, fps=30, window_name="Video", titles=None):
     # Convert tensor to numpy and ensure correct format
     if isinstance(tensor, torch.Tensor):
         frames = tensor.detach().cpu().numpy()
@@ -130,12 +130,17 @@ def play_tensor_video_opencv(tensor, fps=30, window_name="Tensor Video"):
     frames = frames[..., ::-1]  # RGB -> BGR
     
     # Normalize to 0-255 if needed
-    frames =  (frames - frames.min())/(frames.max() - frames.min() + 1e-5)
-    frames = frames * 255.0
-    frames = frames.astype(np.uint8)
+    if frames.dtype != np.uint8 or frames.max() > 1.0:
+        frames =  (frames - frames.min())/(frames.max() - frames.min() + 1e-5)
+        frames = frames * 255.0
+        frames = frames.astype(np.uint8)
     
     # Play video
-    for frame in frames:
+    for i, frame in enumerate(frames):
+        if titles is not None:
+            print(titles[i])
+            cv2.putText(frame, str(titles[i]), (10, 30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
         cv2.imshow(window_name, frame)
         
         # Wait for key press or delay

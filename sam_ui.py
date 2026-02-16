@@ -9,7 +9,7 @@ import cv2
 from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 from sam2.build_sam import build_sam2_video_predictor
-
+import func
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 
@@ -133,7 +133,7 @@ import glob
 BASE_DIR = Path(__file__).parent
 
 class Seg_UI:
-    def __init__(self, vid_path ,n_frames=16, start_idx=0):
+    def __init__(self, vid_path ,n_frames=16, start_idx=0, annot_frame=0):
         sam2_checkpoint = os.path.join(BASE_DIR, "checkpoints" , "sam2.1_hiera_large.pt")
         model_cfg = os.path.join(BASE_DIR , "checkpoints" ,"sam2.1_hiera_l.yaml")
         self.predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device=device)
@@ -162,6 +162,7 @@ class Seg_UI:
 
         self.prev_masks = []
         self.object_id = 0
+        self.annot_frame = annot_frame
 
     def mouse_callback(self, event, x, y, flags, param):
         clicked = False
@@ -199,7 +200,7 @@ class Seg_UI:
                 self.current_mask = m[0].cpu().numpy()
                 self.update_display(input_point, input_label)
 
-    def overlay_mask(self, image, mask, color=(0, 255, 0), alpha=0.5):
+    def overlay_mask(self, image, mask, color=(0, 255, 0), alpha=0.8):
         """Overlay mask on image with specified color and transparency"""
         overlay = image.copy()
         
@@ -249,16 +250,6 @@ class Seg_UI:
         # Draw points
         display = self.draw_points(display, self.positive_pts, self.negative_pts)
         
-        # Add info text
-        info_text = f"Pos: {len(self.positive_pts)} | Neg: {len(self.negative_pts)}"
-        cv2.putText(display, info_text, (10, 30), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        
-        if input_point is not None and len(input_point) > 0:
-            coord_text = f"Last point: ({input_point[-1][0]}, {input_point[-1][1]})"
-            cv2.putText(display, coord_text, (10, 60), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        
         # Update the display
         self.display_image = display
         cv2.imshow(self.window_name, display)
@@ -275,7 +266,9 @@ class Seg_UI:
         # show_masks(image, masks, scores, point_coords=input_point, input_labels=input_label)
 
     def display_frame(self):
-        image = cv2.imread(self.files[0])
+        image = cv2.imread(self.files[self.annot_frame])
+        # scale_factor = 3.0
+        # image = cv2.resize(image, (int(image.shape[0]*scale_factor), int(image.shape[1]*scale_factor)), interpolation=cv2.INTER_LINEAR)
         if len(self.prev_masks)>0:
             image = self.paint_masks(image, self.prev_masks)
         self.original_image = image
@@ -315,7 +308,7 @@ class Seg_UI:
 
         cv2.destroyAllWindows()
     
-    def propagate_video(self):
+    def propagate_video(self, display=True):
         video_segments = {} 
         for out_frame_idx, out_obj_ids, out_mask_logits in self.predictor.propagate_in_video(self.inference_state):
             video_segments[out_frame_idx] = {
@@ -324,31 +317,30 @@ class Seg_UI:
         }
 
 
-        colors = generate_distinct_colors_matplotlib(self.object_id+1)
-        vis_frame_stride = 1
-        for out_frame_idx in range(0, len(self.files), vis_frame_stride):
-            img = cv2.imread(self.files[out_frame_idx])
-            for out_obj_id, out_mask in video_segments[out_frame_idx].items():
-                img = self.overlay_mask(img, out_mask[0], color=colors[out_obj_id])
-
-        pass
+        if display:
+            colors = generate_distinct_colors_matplotlib(self.object_id+1)
+            vis_frame_stride = 1
+            v = []
+            for out_frame_idx in range(0, len(self.files), vis_frame_stride):
+                img = cv2.imread(self.files[out_frame_idx])
+                for out_obj_id, out_mask in video_segments[out_frame_idx].items():
+                    img = self.overlay_mask(img, out_mask[0], color=colors[out_obj_id])
+                v.append(img)
+            v = np.stack(v, axis=0)
+            func.play_tensor_video_opencv(v[...,::-1], fps=2, titles=list(range(v.shape[0])))
 
 # img_path = r'C:\Users\lahir\Downloads\UCF101\jpgs\Basketball\v_Basketball_g12_c01\image_00263.jpg'
-vid_path = r'C:\\Users\\lahir\\Downloads\\UCF101\\jpgs\\Basketball\\v_Basketball_g12_c01\\'
+vid_path = r'C:\Users\lahir\Downloads\UCF101\jpgs\Archery\v_Archery_g25_c05'
 
 def get_masks_from_ui(vid_path):
-    segui = Seg_UI(vid_path)
+    segui = Seg_UI(vid_path, annot_frame=12)
     segui.display_frame()
-    
-    while True:
+    while not segui.done:
         segui.display_frame()
-        if segui.done:
-            break
 
     #propagete masks through the video
     pass
     segui.propagate_video()
-    pass
 
 get_masks_from_ui(vid_path)
 
