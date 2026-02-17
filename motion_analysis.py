@@ -246,8 +246,8 @@ def motion_importance_dataset():
         gt_class_name = targets[0][0].split('_')[1]
         file_name = targets[0][0]
 
-        # if file_name!='v_ApplyEyeMakeup_g04_c03':
-        #     continue
+        if file_name!='v_Swing_g07_c02':
+            continue
 
         seq = targets[0][1]
         ret = motion_importance(video.unsqueeze(0))

@@ -336,6 +336,8 @@ class Seg_UI:
             v = np.stack(v, axis=0)
             func.play_tensor_video_opencv(v[...,::-1], fps=2, titles=list(range(v.shape[0])))
 
+        return video_segments
+
 def get_masks_from_ui(vid_path, display=True, annot_frame=0):
     segui = Seg_UI(vid_path, annot_frame=annot_frame)
     segui.display_frame()
@@ -343,7 +345,9 @@ def get_masks_from_ui(vid_path, display=True, annot_frame=0):
         segui.display_frame()
 
     #propagete masks through the video
-    segui.propagate_video(display=display)
+    video_segments = segui.propagate_video(display=display)
+
+    return video_segments
 
 
 if __name__ == '__main__':

@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import cv2
 import os
+import sam_ui
 
 #create model and data loader
 ucf101dm = func.UCF101_data_model()
@@ -229,12 +230,17 @@ def modify_flow(img1, img2, flow, mask):
 
 # func.show_gray_image(mask_mask.float().cpu().numpy())
 
-
+import random
 def go_through_samples():
-    img_out_path = r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance_imgs'
+    mask_out_path = r'C:\Users\lahir\Downloads\UCF101\analysis\masks'
     path = r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance.json'
     with open(path, 'r', encoding='utf-8') as file:
         data_dict = json.load(file)
+
+    #randomize data_dict
+    k = list(data_dict.keys())
+    random.shuffle(k)
+    data_dict = {key: data_dict[key] for key in k}
 
     for i, k in enumerate(data_dict):
         print(f'Processing sample {i+1}/{len(data_dict)}: {k}', end='\r')
@@ -247,6 +253,8 @@ def go_through_samples():
         gt_class_idx = class_labels[gt_class.lower()]
         pred_logit = d['motion_importance']['pred_original_logit']
         pred_class = d['motion_importance']['pred_original_class']
+
+        #we consider only correctly lassified samples
         if gt_class.lower() != pred_class.lower():
             continue
 
@@ -281,43 +289,64 @@ def go_through_samples():
             pairs = [pi[0] for pi in pair_importance if pi[0]!=[None,None]]
             ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
 
-            video_ = func.create_new_video(video.permute(1,0,2,3), clustered_ids, ordered_keys)
-            heatmaps = spacial_analysis_perturb(video_, gt_class_idx, d['pair_analysis']['all_imp_pairs_logit'], ordered_keys, clustered_ids)
+            #CHECK IF MASKS ALREADY GENERATED
+            maks_exist = False
+            mask_path = os.path.join(mask_out_path, k)
+            if os.path.exists(mask_path):
+                if len(os.listdir(mask_path)) == 16:
+                    maks_exist = True
+            
+            if not maks_exist:
+                masks = sam_ui.get_masks_from_ui(vid_path, display=True, annot_frame=8)
+                os.makedirs(mask_path, exist_ok=True)
+                for i in range(len(masks)):
+                    fm=masks[i]
+                    f_path = os.path.join(mask_path, str(i))
+                    os.makedirs(f_path, exist_ok=True)
+                    for oi in range(len(fm)):
+                        om = fm[oi]
+                        o_path = os.path.join(f_path, f'{oi}.jpg')
+                        cv2.imwrite(o_path, om[0,:]*255)
+            
+            pass
 
-            sub_dir = os.path.join(img_out_path, gt_class, k)
-            os.makedirs(sub_dir, exist_ok=True)
+            # video_ = func.create_new_video(video.permute(1,0,2,3), clustered_ids, ordered_keys)
+            # heatmaps = spacial_analysis_perturb(video_, gt_class_idx, d['pair_analysis']['all_imp_pairs_logit'], ordered_keys, clustered_ids)
 
-            for i in range(len(heatmaps)):
-                p = pairs[i]
+            # sub_dir = os.path.join(img_out_path, gt_class, k)
+            # os.makedirs(sub_dir, exist_ok=True)
 
-                hm = heatmaps[i]['heatmap']
-                out_path = os.path.join(sub_dir, f'hm_{p[0]}_{p[1]}.jpg')
-                cv2.imwrite(out_path, hm)
+            # for i in range(len(heatmaps)):
+            #     p = pairs[i]
 
-                gcam = heatmaps[i]['gcam']
-                gcam = np.uint8(gcam*255)
-                out_path = os.path.join(sub_dir, f'gcam_{p[0]}_{p[1]}.jpg')
-                cv2.imwrite(out_path, gcam)
+            #     hm = heatmaps[i]['heatmap']
+            #     out_path = os.path.join(sub_dir, f'hm_{p[0]}_{p[1]}.jpg')
+            #     cv2.imwrite(out_path, hm)
 
-                f = heatmaps[i]['flow_mag']
-                f = np.uint8((f - f.min())/(f.max()-f.min()+1e-5)*255)
-                out_path = os.path.join(sub_dir, f'fmag_{p[0]}_{p[1]}.jpg')
-                cv2.imwrite(out_path, f)
+            #     gcam = heatmaps[i]['gcam']
+            #     gcam = np.uint8(gcam*255)
+            #     out_path = os.path.join(sub_dir, f'gcam_{p[0]}_{p[1]}.jpg')
+            #     cv2.imwrite(out_path, gcam)
 
-                # fm = heatmaps[i]['flow_mask']
-                # fm = np.uint8(fm*255)
-                # out_path = os.path.join(sub_dir, f'fmask_{p[0]}_{p[1]}.jpg')
-                # cv2.imwrite(out_path, fm)
+            #     f = heatmaps[i]['flow_mag']
+            #     f = np.uint8((f - f.min())/(f.max()-f.min()+1e-5)*255)
+            #     out_path = os.path.join(sub_dir, f'fmag_{p[0]}_{p[1]}.jpg')
+            #     cv2.imwrite(out_path, f)
 
-                m = heatmaps[i]['mask']
-                m = np.uint8(m*255)
-                out_path = os.path.join(sub_dir, f'mask_{p[0]}_{p[1]}.jpg')
-                cv2.imwrite(out_path, m)
+            #     # fm = heatmaps[i]['flow_mask']
+            #     # fm = np.uint8(fm*255)
+            #     # out_path = os.path.join(sub_dir, f'fmask_{p[0]}_{p[1]}.jpg')
+            #     # cv2.imwrite(out_path, fm)
 
-                # gm = heatmaps[i]['gcam_mask']
-                # gm = np.uint8(gm*255)
-                # out_path = os.path.join(sub_dir, f'gmask_{p[0]}_{p[1]}.jpg')
-                # cv2.imwrite(out_path, gm)
+            #     m = heatmaps[i]['mask']
+            #     m = np.uint8(m*255)
+            #     out_path = os.path.join(sub_dir, f'mask_{p[0]}_{p[1]}.jpg')
+            #     cv2.imwrite(out_path, m)
+
+            #     # gm = heatmaps[i]['gcam_mask']
+            #     # gm = np.uint8(gm*255)
+            #     # out_path = os.path.join(sub_dir, f'gmask_{p[0]}_{p[1]}.jpg')
+            #     # cv2.imwrite(out_path, gm)
 
             
 if __name__ == '__main__':
