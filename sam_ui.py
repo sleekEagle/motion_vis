@@ -335,19 +335,30 @@ class Seg_UI:
                 v.append(img)
             v = np.stack(v, axis=0)
             func.play_tensor_video_opencv(v[...,::-1], fps=2, titles=list(range(v.shape[0])))
+            
+            inp = input("y for okay. Frame number to run again with the annotation frame number: ")
+            if inp.lower() == 'y':
+                return video_segments
+            elif inp.isdigit():
+                annot_frame = int(inp)
+                return annot_frame
+            else:
+                Exception("Invalid input. Quitting without saving.")
 
-        return video_segments
-
-def get_masks_from_ui(vid_path, display=True, annot_frame=0):
+def run_ui(vid_path, display=True, annot_frame=0):
     segui = Seg_UI(vid_path, annot_frame=annot_frame)
     segui.display_frame()
     while not segui.done:
         segui.display_frame()
+    ret = segui.propagate_video(display=display)
+    return ret
 
-    #propagete masks through the video
-    video_segments = segui.propagate_video(display=display)
+def get_masks_from_ui(vid_path, display=True, annot_frame=0):
+    ret = run_ui(vid_path, display=display, annot_frame=annot_frame)
+    while type(ret) != dict:
+        ret = run_ui(vid_path, display=display, annot_frame=ret)
 
-    return video_segments
+    return ret
 
 
 if __name__ == '__main__':
