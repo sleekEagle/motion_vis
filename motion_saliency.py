@@ -236,15 +236,16 @@ from skimage.transform import resize
 def spacial_analysis(video, pairs, masks, clustered_ids):
     FLOW_RATIO = 0.9
     ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
-    video = func.create_new_video(video.permute(0,2,3,1), clustered_ids, ordered_keys)
+    video = func.create_new_video(video.permute(1,0,2,3), clustered_ids, ordered_keys)
+    # func.play_tensor_video_opencv(video.permute(1,0,2,3),fps=2)
 
     #predict flow batch
 
     img1 = torch.empty(0)
     img2 = torch.empty(0)
     for pair in pairs:
-        i1_ = video[pair[0],:][None,:].permute(0,3,1,2)
-        i2_ = video[pair[1],:][None,:].permute(0,3,1,2)
+        i1_ = video[:,pair[0],:][None,:]
+        i2_ = video[:, pair[1],:][None,:]
         img1 = torch.concatenate([img1,i1_],dim=0)
         img2 = torch.concatenate([img2,i2_],dim=0)
     flow = raftof.predict_flow_batch(img2, img1)
@@ -258,6 +259,10 @@ def spacial_analysis(video, pairs, masks, clustered_ids):
             resized = resize(obj_mask.astype(float), (img1.size(2),img1.size(3)), preserve_range=True)
             obj_mask = resized > 0.5
 
+            # fmag = torch.sum(fcopy**2,dim=0)**0.5
+            # func.show_gray_image(fmag.cpu().numpy())
+            # func.show_gray_image(obj_mask*1.0)
+            
             #modify flow
             fcopy = f.clone()
             f_ = fcopy*FLOW_RATIO
@@ -342,7 +347,7 @@ def go_through_samples():
                     maks_exist = True
             
             if not maks_exist:
-                masks = sam_ui.get_masks_from_ui(vid_path, display=True, annot_frame=8)
+                masks = sam_ui.get_masks_from_ui(vid_path, display=True, annot_frame=0)
                 os.makedirs(mask_path, exist_ok=True)
                 for i in range(len(masks)):
                     fm=masks[i]
