@@ -189,7 +189,7 @@ class Seg_UI:
             # self.predictor.reset_state(self.inference_state)
             _, out_obj_ids, out_mask_logits = self.predictor.add_new_points_or_box(
                 inference_state=self.inference_state,
-                frame_idx=0,
+                frame_idx=self.annot_frame,
                 obj_id=self.object_id,
                 points=input_point,
                 labels=input_label,
@@ -310,7 +310,14 @@ class Seg_UI:
     
     def propagate_video(self, display=True):
         video_segments = {} 
-        for out_frame_idx, out_obj_ids, out_mask_logits in self.predictor.propagate_in_video(self.inference_state):
+        for out_frame_idx, out_obj_ids, out_mask_logits in self.predictor.propagate_in_video(self.inference_state, reverse=True):
+            print(out_frame_idx)
+            video_segments[out_frame_idx] = {
+            out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
+            for i, out_obj_id in enumerate(out_obj_ids)
+        }
+        for out_frame_idx, out_obj_ids, out_mask_logits in self.predictor.propagate_in_video(self.inference_state, reverse=False):
+            print(out_frame_idx)
             video_segments[out_frame_idx] = {
             out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
             for i, out_obj_id in enumerate(out_obj_ids)
@@ -329,35 +336,17 @@ class Seg_UI:
             v = np.stack(v, axis=0)
             func.play_tensor_video_opencv(v[...,::-1], fps=2, titles=list(range(v.shape[0])))
 
-# img_path = r'C:\Users\lahir\Downloads\UCF101\jpgs\Basketball\v_Basketball_g12_c01\image_00263.jpg'
-vid_path = r'C:\Users\lahir\Downloads\UCF101\jpgs\Biking\v_Biking_g24_c03'
-
-def get_masks_from_ui(vid_path):
-    segui = Seg_UI(vid_path, annot_frame=0)
+def get_masks_from_ui(vid_path, display=True, annot_frame=0):
+    segui = Seg_UI(vid_path, annot_frame=annot_frame)
     segui.display_frame()
     while not segui.done:
         segui.display_frame()
 
     #propagete masks through the video
-    pass
-    segui.propagate_video()
-
-get_masks_from_ui(vid_path)
+    segui.propagate_video(display=display)
 
 
-
-# class Vid_Seg_UI:
-#     def __init__(self, prev_masks=None):
-#         self.prev_masks = prev_masks
-#         sam2_checkpoint = os.path.join(BASE_DIR, "checkpoints" , "sam2.1_hiera_large.pt")
-#         model_cfg = os.path.join(BASE_DIR , "checkpoints" ,"sam2.1_hiera_l.yaml")
-#         self.predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device=device)
-#         inference_state = self.predictor.init_state(video_path=vid_path,n_frames=16, start_idx=0)
-#         self.predictor.reset_state(inference_state)
-
-
-#         pass
-
-# segui = Vid_Seg_UI()
-
+if __name__ == '__main__':
+    vid_path = r'C:\Users\lahir\Downloads\UCF101\jpgs\MoppingFloor\v_MoppingFloor_g25_c01'
+    get_masks_from_ui(vid_path, display=True, annot_frame=12)
 

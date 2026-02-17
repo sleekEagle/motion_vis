@@ -121,6 +121,15 @@ def play_tensor_video_opencv(tensor, fps=30, window_name="Video", titles=None):
         frames = tensor.detach().cpu().numpy()
     else:
         frames = tensor
+
+    if titles is not None and len(titles) == frames.shape[0]:
+        border_size = 10
+        frames = np.pad(
+            frames,
+            pad_width=((0, 0), (border_size, border_size), (border_size, border_size), (0, 0)),
+            mode='constant',
+            constant_values=0
+        )
     
     # Ensure shape: [T, C, H, W] -> [T, H, W, C] for OpenCV
     if frames.shape[1] == 3:  # [T, C, H, W]
@@ -140,7 +149,7 @@ def play_tensor_video_opencv(tensor, fps=30, window_name="Video", titles=None):
         if titles is not None:
             print(titles[i])
             cv2.putText(frame, str(titles[i]), (10, 30), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
         cv2.imshow(window_name, frame)
         
         # Wait for key press or delay
