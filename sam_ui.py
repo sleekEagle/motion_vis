@@ -133,17 +133,23 @@ import glob
 BASE_DIR = Path(__file__).parent
 
 class Seg_UI:
-    def __init__(self, vid_path ,n_frames=16, start_idx=0, annot_frame=0):
-        sam2_checkpoint = os.path.join(BASE_DIR, "checkpoints" , "sam2.1_hiera_large.pt")
-        model_cfg = os.path.join(BASE_DIR , "checkpoints" ,"sam2.1_hiera_l.yaml")
-        self.predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device=device)
-        self.inference_state = self.predictor.init_state(video_path=vid_path,n_frames=n_frames, start_idx=0)
-        self.predictor.reset_state(self.inference_state)
-
+    def __init__(self, vid_path, n_frames=16, start_idx=0, annot_frame=0, vid_fps=4):
         #get all file paths
         self.files = glob.glob(f'{vid_path}\\*.jpg')
         self.files.sort(key=lambda p: int(os.path.splitext(p)[0].split('_')[-1]))
-        self.files = self.files[start_idx : start_idx + n_frames]  # only take the first 16 frames for now
+        max_frames = len(self.files)-start_idx
+        if n_frames==-1:
+            self.n_frames = max_frames
+        else:
+            self.n_frames = min(max_frames, n_frames)
+
+        sam2_checkpoint = os.path.join(BASE_DIR, "checkpoints" , "sam2.1_hiera_large.pt")
+        model_cfg = os.path.join(BASE_DIR , "checkpoints" ,"sam2.1_hiera_l.yaml")
+        self.predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device=device)
+        self.inference_state = self.predictor.init_state(video_path=vid_path,n_frames=self.n_frames, start_idx=0)
+        self.predictor.reset_state(self.inference_state)
+
+        self.files = self.files[start_idx : start_idx + self.n_frames]
 
         self.positive_pts = np.empty((0, 2))
         self.positive_lbls = np.empty((0))
@@ -163,6 +169,8 @@ class Seg_UI:
         self.prev_masks = []
         self.object_id = 0
         self.annot_frame = annot_frame
+
+        self.vid_fps = vid_fps
 
     def mouse_callback(self, event, x, y, flags, param):
         clicked = False
@@ -334,7 +342,7 @@ class Seg_UI:
                     img = self.overlay_mask(img, out_mask[0], color=colors[out_obj_id])
                 v.append(img)
             v = np.stack(v, axis=0)
-            func.play_tensor_video_opencv(v[...,::-1], fps=2, titles=list(range(v.shape[0])))
+            func.play_tensor_video_opencv(v[...,::-1], fps=self.vid_fps, titles=list(range(v.shape[0])))
             
             inp = input("y for okay. Frame number to run again with the annotation frame number: ")
             if inp.lower() == 'y':
@@ -345,23 +353,24 @@ class Seg_UI:
             else:
                 Exception("Invalid input. Quitting without saving.")
 
-def run_ui(vid_path, display=True, annot_frame=0):
-    segui = Seg_UI(vid_path, annot_frame=annot_frame)
+def run_ui(vid_path, display=True, n_frames=-1, annot_frame=0, vid_fps=4):
+    segui = Seg_UI(vid_path, n_frames=n_frames, annot_frame=annot_frame, vid_fps=vid_fps)
     segui.display_frame()
     while not segui.done:
         segui.display_frame()
     ret = segui.propagate_video(display=display)
     return ret
 
-def get_masks_from_ui(vid_path, display=True, annot_frame=0):
-    ret = run_ui(vid_path, display=display, annot_frame=annot_frame)
+def get_masks_from_ui(vid_path, display=True, n_frames=-1, annot_frame=0, vid_fps=4):
+    ret = run_ui(vid_path, display=display, n_frames=n_frames, annot_frame=annot_frame, vid_fps=vid_fps)
     while type(ret) != dict:
-        ret = run_ui(vid_path, display=display, annot_frame=ret)
+        ret = run_ui(vid_path, display=display, n_frames=n_frames, annot_frame=ret, vid_fps=vid_fps)
 
     return ret
 
 
 if __name__ == '__main__':
+    import hydra
+    hydra.initialize()
     vid_path = r'C:\Users\lahir\Downloads\UCF101\jpgs\MoppingFloor\v_MoppingFloor_g25_c01'
-    get_masks_from_ui(vid_path, display=True, annot_frame=12)
-
+    mask = get_masks_from_ui(vid_path, display=True, n_frames=16, annot_frame=0, vid_fps=4)
