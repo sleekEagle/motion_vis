@@ -24,7 +24,15 @@ import csv
 import pandas as pd
 import func
 
-
+ucf101dm = func.UCF101_data_model()
+model = ucf101dm.model
+inference_loader = ucf101dm.inference_loader
+inference_class_names = ucf101dm.inference_class_names
+class_names = ucf101dm.inference_class_names
+class_labels = {}
+for k in class_names.keys():
+    cls_name = class_names[k]
+    class_labels[cls_name.lower()] = k
 
 
 def load_jpg_ucf101(l, g, c, n, inference_class_names, transform):
@@ -47,10 +55,10 @@ def load_jpg_ucf101(l, g, c, n, inference_class_names, transform):
 
 
 
-ucf101dm = func.UCF101_data_model()
-model = ucf101dm.model
-inference_loader = ucf101dm.inference_loader
-inference_class_names = ucf101dm.inference_class_names
+# ucf101dm = func.UCF101_data_model()
+# model = ucf101dm.model
+# inference_loader = ucf101dm.inference_loader
+# inference_class_names = ucf101dm.inference_class_names
 
 
 def main():
@@ -188,32 +196,58 @@ def test():
     for idx, batch in enumerate(inference_loader):
         print(f'{idx/len(inference_loader)*100:.0f} % is done.', end='\r')
         inputs, targets = batch
-        cls = [class_labels_map[t[0].split('_')[1].lower()] for t in targets]
+        cls = [class_labels[t[0].split('_')[1].lower()] for t in targets]
         with torch.inference_mode():
             pred = model(inputs)
             pred_cls = torch.argmax(pred,dim=1)
             n_samples += len(pred_cls)
             n_correct += ((pred_cls == torch.tensor(cls)).sum()).item()
-
-    # root = "C:\\Users\\lahir\\Downloads\\UCF101\\jpgs"
-    # for k in inference_class_names.keys():
-    #     print(f'Inferring class {k} out of {len(list(inference_class_names.keys()))}')
-    #     class_path = os.path.join(root,inference_class_names[k])
-    #     dirs = [item.name for item in Path(class_path).iterdir() if item.is_dir()]
-
-    #     for d in dirs:
-    #         l = k
-    #         g = int(d.split('_')[2][1:])
-    #         c = int(d.split('_')[3][1:])
-    #         n=0
-    #         video = load_jpg_ucf101(l, g, c, n, inference_class_names, transform).transpose(0, 1)
-    #         with torch.inference_mode():
-    #             n_samples += 1
-    #             pred = model(video.unsqueeze(0)).cpu().numpy().argmax()
-    #             if int(pred) == k:
-    #                 n_correct += 1
     print(f'Acuracy : {n_correct/n_samples}')
 
+'''
+same test without using the dataloader directly
+Acuracy : 0.8540840602696272
+'''
+def test_noloader():
+    n_samples = 0
+    n_correct = 0
+    start_idx = 0
+    for idx, batch in enumerate(inference_loader):
+        print(f'{idx/len(inference_loader)*100:.0f} % is done.', end='\r')
+        inputs, targets = batch
+        cls = [class_labels[t[0].split('_')[1].lower()] for t in targets]
+        filename = batch[1][0][0]
+        full_path = ucf101dm.construct_vid_path_from_full(filename)
+        video = ucf101dm.load_jpg_ucf101(full_path, n=start_idx)
+        with torch.inference_mode():  
+            pred = model(video.permute(1,0,2,3)[None,:])
+            pred_cls = torch.argmax(pred,dim=1)
+            n_samples += len(pred_cls)
+            n_correct += ((pred_cls == torch.tensor(cls[start_idx])).sum()).item()
+
+    print(f'Acuracy : {n_correct/n_samples}')
+
+
+def test_mask_noloader():
+    n_samples = 0
+    n_correct = 0
+    start_idx = 0
+    mask_path = r'C:\Users\lahir\Downloads\UCF101\analysis\masks'
+
+    for idx, batch in enumerate(inference_loader):
+        print(f'{idx/len(inference_loader)*100:.0f} % is done.', end='\r')
+        inputs, targets = batch
+        cls = [class_labels[t[0].split('_')[1].lower()] for t in targets]
+        filename = batch[1][0][0]
+        full_path = ucf101dm.construct_vid_path_from_full(filename)
+        video = ucf101dm.load_jpg_ucf101(full_path, n=start_idx)
+        with torch.inference_mode():  
+            pred = model(video.permute(1,0,2,3)[None,:])
+            pred_cls = torch.argmax(pred,dim=1)
+            n_samples += len(pred_cls)
+            n_correct += ((pred_cls == torch.tensor(cls[start_idx])).sum()).item()
+
+    print(f'Acuracy : {n_correct/n_samples}')
 
 
 def get_video_frame_motion_importance(video):
@@ -494,5 +528,5 @@ def test_method():
 
 
 if __name__ == '__main__':
-    test_method()
+    test_mask_noloader()
 

@@ -250,6 +250,7 @@ def spacial_analysis(video, pairs, masks, clustered_ids):
         img2 = torch.concatenate([img2,i2_],dim=0)
     flow = raftof.predict_flow_batch(img2, img1)
     flow = raftof.resize_flow_interpolate(flow)
+    # raftof.visualize(img2,flow)
 
     for i, pair in enumerate(pairs):
         m = masks[pair[0]]
@@ -259,14 +260,22 @@ def spacial_analysis(video, pairs, masks, clustered_ids):
             resized = resize(obj_mask.astype(float), (img1.size(2),img1.size(3)), preserve_range=True)
             obj_mask = resized > 0.5
 
-            # fmag = torch.sum(fcopy**2,dim=0)**0.5
+            fmag = torch.sum(f**2,dim=0)**0.5
             # func.show_gray_image(fmag.cpu().numpy())
             # func.show_gray_image(obj_mask*1.0)
+            func.show_rgb_image(video[:,pair[0],:].permute(1,2,0).cpu().numpy())
             
             #modify flow
             fcopy = f.clone()
             f_ = fcopy*FLOW_RATIO
             fcopy[:,obj_mask] = f_[:,obj_mask]
+
+            fcopymag = torch.sum(fcopy**2,dim=0)**0.5
+
+            img = torch.concat([torch.tensor(obj_mask)*1.0,fmag.cpu(),fcopymag.cpu()],dim=0)
+            func.show_gray_image(img.numpy())
+
+
 
             #warp image to generate modified image
             warp = func.warp_batch(img1.to('cuda'),fcopy)

@@ -868,17 +868,21 @@ class UCF101_data_model:
         self.class_labels_map = {v.lower(): k for k, v in self.inference_class_names.items()}
         self.transform = self.inference_loader.dataset.spatial_transform
 
+        self.mask_dir = r'C:\Users\lahir\Downloads\UCF101\analysis\masks'
+        self.data_path = "C:\\Users\\lahir\\Downloads\\UCF101\\jpgs"
+
     def construct_vid_path(self, cls_name, g, c):
         dir = os.path.join(
-            "C:\\Users\\lahir\\Downloads\\UCF101\\jpgs", cls_name, "v_{}_g{}_c{}".format(cls_name, str(g).zfill(2), str(c).zfill(2))
+            self.data_path , cls_name, "v_{}_g{}_c{}".format(cls_name, str(g).zfill(2), str(c).zfill(2))
         )
         return dir
     
     def construct_vid_path_from_full(self, path):
-        dir = os.path.join(
-            "C:\\Users\\lahir\\Downloads\\UCF101\\jpgs", path
-        )
-        return dir
+        g = path.split('_')[2][1:]
+        c = path.split('_')[3][1:]
+        cls_name = path.split('_')[1]
+        path = self.construct_vid_path(cls_name, g, c)
+        return path
 
     def load_jpg_ucf101_param(self, l, g, c, n):
         name = self.inference_class_names[l]
@@ -910,6 +914,16 @@ class UCF101_data_model:
             video.append(self.transform(Image.open(_p)))
 
         return torch.stack(video)
+    
+    def load_mask(self, filename, n=0):
+        cls_name = filename.split('_')[1]
+        dir_path = os.path.join(self.mask_dir, cls_name, filename)
+        files = sorted(glob(dir_path + "/*"), key=numericalSort)
+        if len(files)==0:
+            return -1
+
+
+        pass
 
     
 
