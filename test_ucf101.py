@@ -488,7 +488,6 @@ def gradcam_sal():
 
             cv2.imwrite(os.path.join(out_dir,f'{n}.png'), final_img)
 
-from track import CoTracker
 import seg
 
 def test_method():
@@ -528,5 +527,5 @@ def test_method():
 
 
 if __name__ == '__main__':
-    test_mask_noloader()
+    test_noloader()
 

@@ -26,7 +26,7 @@ def show_gray_image(gray):
     gray = gray.astype(np.uint8)
     plt.imshow(gray, cmap='gray')
     plt.axis("off")
-    plt.show()
+    plt.show(block=True)
 
 #input img shape: [H, W, 3], np array
 def show_rgb_image(img):
@@ -36,6 +36,30 @@ def show_rgb_image(img):
     img = img.astype(np.uint8)
     plt.imshow(img)
     plt.axis("off")
+    plt.show(block=True)
+
+def overlay_mask(img_np, mask_np):
+    plt.figure(figsize=(8, 4))
+    # Original image
+    plt.subplot(1, 3, 1)
+    plt.imshow(img_np)
+    plt.title('Original Image')
+    plt.axis('off')
+
+    # Mask only
+    plt.subplot(1, 3, 2)
+    plt.imshow(mask_np, cmap='gray')
+    plt.title('Mask')
+    plt.axis('off')
+
+    # Overlay
+    plt.subplot(1, 3, 3)
+    plt.imshow(img_np)
+    plt.imshow(mask_np, cmap='jet', alpha=0.5)  # Overlay with transparency
+    plt.title('Overlay')
+    plt.axis('off')
+
+    plt.tight_layout()
     plt.show()
 
 def flow_to_rgb(flow):
@@ -835,6 +859,7 @@ acess the UCF101 model and inference loader
 import json
 from models.resnet3d.main import generate_model, get_inference_utils, resume_model
 from models.resnet3d.model import generate_model, make_data_parallel
+from models.resnet3d.spatial_transforms import Compose
 from argparse import Namespace
 import re
 import os
@@ -867,6 +892,11 @@ class UCF101_data_model:
         self.inference_loader, self.inference_class_names = get_inference_utils(model_opt)
         self.class_labels_map = {v.lower(): k for k, v in self.inference_class_names.items()}
         self.transform = self.inference_loader.dataset.spatial_transform
+        self.mask_transforms = Compose([
+            self.transform.transforms[0],  # Resize
+            self.transform.transforms[1],  # CenterCrop
+            self.transform.transforms[2]   # ToTensor
+        ])
 
         self.mask_dir = r'C:\Users\lahir\Downloads\UCF101\analysis\masks'
         self.data_path = "C:\\Users\\lahir\\Downloads\\UCF101\\jpgs"
@@ -915,15 +945,27 @@ class UCF101_data_model:
 
         return torch.stack(video)
     
-    def load_mask(self, filename, n=0):
+    def load_masks(self, filename, n=0):
         cls_name = filename.split('_')[1]
         dir_path = os.path.join(self.mask_dir, cls_name, filename)
-        files = sorted(glob(dir_path + "/*"), key=numericalSort)
-        if len(files)==0:
+        frame_idx = sorted(glob(dir_path + "/*"), key=numericalSort)
+        if len(frame_idx)==0:
             return -1
+        frame_idx = frame_idx[n * 16 : (n + 1) * 16]
 
-
-        pass
+        masks = {}
+        for idx in frame_idx:
+            obj_ids = sorted(glob(idx + "/*"), key=numericalSort)
+            f_ = os.path.basename(idx)
+            o_masks = {}
+            for o in obj_ids:
+                o_ = os.path.basename(o).split('.')[0]
+                mask = self.mask_transforms(Image.fromarray(np.repeat(np.array(Image.open(o))[...,None], repeats=3, axis=-1)))[0,:]
+                mask = mask > 0.5
+                o_masks[int(o_)] = mask
+            masks[int(f_)] = o_masks
+        
+        return masks
 
     
 

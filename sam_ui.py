@@ -362,9 +362,6 @@ def run_ui(vid_path, display=True, n_frames=-1, annot_frame=0, vid_fps=4):
     return ret
 
 def get_masks_from_ui(vid_path, display=True, n_frames=-1, annot_frame=0, vid_fps=4):
-    import hydra
-    hydra.initialize()
-
     ret = run_ui(vid_path, display=display, n_frames=n_frames, annot_frame=annot_frame, vid_fps=vid_fps)
     while type(ret) != dict:
         ret = run_ui(vid_path, display=display, n_frames=n_frames, annot_frame=ret, vid_fps=vid_fps)
@@ -373,5 +370,8 @@ def get_masks_from_ui(vid_path, display=True, n_frames=-1, annot_frame=0, vid_fp
 
 
 if __name__ == '__main__':
+    import hydra
+    hydra.initialize()
+
     vid_path = r'C:\Users\lahir\Downloads\UCF101\jpgs\MoppingFloor\v_MoppingFloor_g25_c01'
     mask = get_masks_from_ui(vid_path, display=True, n_frames=16, annot_frame=0, vid_fps=4)

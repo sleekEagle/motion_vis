@@ -21,7 +21,7 @@ for k in class_names.keys():
     cls_name = class_names[k]
     class_labels[cls_name.lower()] = k
 THR = 0.05
-
+ucf101dm
 gmodel = func.GradcamModel(model)
 gmodel.to('cuda')
 
@@ -256,14 +256,11 @@ def spacial_analysis(video, pairs, masks, clustered_ids):
         m = masks[pair[0]]
         f = flow[i,:]
         for oi in m.keys():
-            obj_mask = m[oi][0,:]
-            resized = resize(obj_mask.astype(float), (img1.size(2),img1.size(3)), preserve_range=True)
-            obj_mask = resized > 0.5
+            obj_mask = m[oi]
+            # func.overlay_mask(img1[i,:].permute(1,2,0).numpy(), obj_mask.numpy())
 
             fmag = torch.sum(f**2,dim=0)**0.5
             # func.show_gray_image(fmag.cpu().numpy())
-            # func.show_gray_image(obj_mask*1.0)
-            func.show_rgb_image(video[:,pair[0],:].permute(1,2,0).cpu().numpy())
             
             #modify flow
             fcopy = f.clone()
@@ -272,16 +269,17 @@ def spacial_analysis(video, pairs, masks, clustered_ids):
 
             fcopymag = torch.sum(fcopy**2,dim=0)**0.5
 
-            img = torch.concat([torch.tensor(obj_mask)*1.0,fmag.cpu(),fcopymag.cpu()],dim=0)
-            func.show_gray_image(img.numpy())
-
-
+            img = torch.concat([torch.tensor(obj_mask)*1.0, fmag.cpu(), fcopymag.cpu()],dim=0)
 
             #warp image to generate modified image
-            warp = func.warp_batch(img1.to('cuda'),fcopy)
+            warp = func.warp_batch(img1[i,:][None,:].to('cuda'),fcopy)
 
-
-            pass
+            m_ = obj_mask[None,:].repeat(3,1,1)
+            im1_ = img1[i,:]
+            im2_ = img2[i,:]
+            w_ = warp[0,:].cpu()
+            img_ = torch.concatenate([im1_,im2_,m_,w_], dim=2)
+            func.show_rgb_image(img_.permute(1,2,0).numpy())
 
 
 
@@ -356,7 +354,8 @@ def go_through_samples():
                     maks_exist = True
             
             if not maks_exist:
-                masks = sam_ui.get_masks_from_ui(vid_path, display=True, annot_frame=0)
+                pass
+                masks = sam_ui.get_masks_from_ui(vid_path, display=True, n_frames=16, annot_frame=0)
                 os.makedirs(mask_path, exist_ok=True)
                 for i in range(len(masks)):
                     fm=masks[i]
@@ -367,6 +366,8 @@ def go_through_samples():
                         o_path = os.path.join(f_path, f'{oi}.jpg')
                         cv2.imwrite(o_path, om[0,:]*255)
             
+            
+            masks = ucf101dm.load_masks(os.path.basename(mask_path))
             spacial_analysis(video, pairs, masks, clustered_ids)
 
             # video_ = func.create_new_video(video.permute(1,0,2,3), clustered_ids, ordered_keys)
