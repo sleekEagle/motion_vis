@@ -38,6 +38,10 @@ def show_rgb_image(img):
     plt.axis("off")
     plt.show(block=True)
 
+'''
+inp_np: 224,224,3
+mask_np: 224,224
+'''
 def overlay_mask(img_np, mask_np):
     plt.figure(figsize=(8, 4))
     # Original image
@@ -60,7 +64,7 @@ def overlay_mask(img_np, mask_np):
     plt.axis('off')
 
     plt.tight_layout()
-    plt.show()
+    plt.show(block=True)
 
 def flow_to_rgb(flow):
     """
@@ -852,7 +856,9 @@ class GradcamModel(nn.Module):
             dPred_dF[:,:5] = 0
             dPred_dF[:,-5:] = 0
 
-            f_mag = torch.sum(f**2,dim=2)**0.5
+            f_mean = f.mean(dim=(0,1))[None,None,:]
+            f_res = f - f_mean
+            f_mag = torch.sum(f_res**2,dim=2)**0.5
             f_mag = (f_mag-f_mag.min())/(f_mag.max()-f_mag.min()+1e-5)
 
             d = {
@@ -861,7 +867,7 @@ class GradcamModel(nn.Module):
                 'dPred_dF*flow': dPred_dF*f_mag,
                 'flow': f,
                 'flow_mag': f_mag,
-                'img': img0[0,:]
+                'img': img1[0,:]
             }
 
             ret[idx] = d

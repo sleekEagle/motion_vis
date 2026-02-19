@@ -327,8 +327,8 @@ def go_through_samples():
         print(f'Processing sample {i+1}/{len(data_dict)}: {k}', end='\r')
 
         d = data_dict[k]
-        if k!='v_SalsaSpin_g06_c04':
-            continue
+        # if k!='v_SalsaSpin_g06_c04':
+        #     continue
         #consider only samples that are correcly predicted
         gt_class = d['motion_importance']['gt_class']
         print(f'Class: {gt_class}')
@@ -355,6 +355,7 @@ def go_through_samples():
             none_imp = None
             if len(pair_importance)==1:
                 none_imp = pair_importance[0][1]
+                continue
             elif pair_importance[0][0] == [None,None]:
                 none_imp = pair_importance[0][1]
             assert none_imp is not None, "Error! None importance is not calculated for this sample"
@@ -403,22 +404,22 @@ def go_through_samples():
             cluster_dict = d
             spacial_analysis_dFdI(video, pairs, cluster_dict, gt_class_idx)
 
-            for i,p in enumerate(pairs):
-                pair_imp = imp[i]
-                imp_max = max([pair_imp[p] for p in pair_imp])
-                imp_min = min([pair_imp[p] for p in pair_imp])
-                pair_imp_scaled = {}
-                for pkey in pair_imp:
-                    pair_imp_scaled[pkey] = (pair_imp[pkey] - imp_min)/(imp_max-imp_min)
+            # for i,p in enumerate(pairs):
+            #     pair_imp = imp[i]
+            #     imp_max = max([pair_imp[p] for p in pair_imp])
+            #     imp_min = min([pair_imp[p] for p in pair_imp])
+            #     pair_imp_scaled = {}
+            #     for pkey in pair_imp:
+            #         pair_imp_scaled[pkey] = (pair_imp[pkey] - imp_min)/(imp_max-imp_min)
 
-                img1 = video[p[0],:]
-                m = masks[p[0]]
-                hilight = torch.zeros(img1.size(1),img1.size(2))
+            #     img1 = video[p[0],:]
+            #     m = masks[p[0]]
+            #     hilight = torch.zeros(img1.size(1),img1.size(2))
 
-                for key in m.keys():
-                    hilight[m[key]] = int(pair_imp_scaled[key]*255)
+            #     for key in m.keys():
+            #         hilight[m[key]] = int(pair_imp_scaled[key]*255)
 
-                func.show_gray_image(hilight.numpy())
+            #     func.show_gray_image(hilight.numpy())
 
 
                 
