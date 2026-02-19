@@ -233,6 +233,16 @@ def show_images_seq(img1, img2):
 
 from skimage.transform import resize
 
+'''
+my theories for 
+why is this not working:
+1. edges of the foreground objects leech into the mask of the background. 
+so when we move the background mask, we also move edges of the foreground object. 
+may be edges are the most important features of the classifcation of the video. so this significantly affect the performance.
+
+2. 
+'''
+
 def spacial_analysis(video, pairs, masks, clustered_ids, gt_class, pred_logit):
     FLOW_RATIO = 1.0
     gt_idx = class_labels[gt_class.lower()]
@@ -252,10 +262,10 @@ def spacial_analysis(video, pairs, masks, clustered_ids, gt_class, pred_logit):
     flow = raftof.predict_flow_batch(img2, img1)
     flow = raftof.resize_flow_interpolate(flow)
 
-    # warp = func.warp_batch(img1.to('cuda'),flow)
-    # i=0
-    # vid = torch.concat([img2[i,:][None,:],warp[i,:][None,:].cpu()],dim=0)
-    # func.play_tensor_video_opencv(vid.permute(0,2,3,1),fps=1)
+    warp = func.warp_batch(img1.to('cuda'),flow)
+    i=0
+    vid = torch.concat([img1[i,:][None,:],img2[i,:][None,:].cpu()],dim=0)
+    func.play_tensor_video_opencv(vid.permute(0,2,3,1),fps=1)
 
     # raftof.visualize(img2,flow)
 
@@ -273,12 +283,13 @@ def spacial_analysis(video, pairs, masks, clustered_ids, gt_class, pred_logit):
 
             # obj_mask = m[0] + m[1]
             fcopy = f.clone()
-            fcopy[:,obj_mask] = f[:,obj_mask]*0.0
+            # fcopy[:,obj_mask] = f[:,obj_mask]*0.0
+            fcopy[:,10:20,10:20] = f[:,10:20,10:20]*0.0
             # fcopymag = torch.sum(fcopy**2,dim=0)**0.5
             # func.show_gray_image(obj_mask.cpu().numpy()*1.0)
             warp = func.warp_batch(img1[i,:][None,:].to('cuda'),fcopy)[0,:]
             video_mod = func.replace_frame(clus_video, ordered_keys, clustered_ids, pair[1], warp)
-            l = func.get_pred_stats(model, video_mod.to('cuda'), gt_class=gt_idx, orig_pred_logit=pred_logit)['logit']
+            l = func.get_pred_stats(model, clus_video.to('cuda'), gt_class=gt_idx, orig_pred_logit=pred_logit)['logit']
             print(f'pair: {pair} object:{oi}, logit: {l}')
 
             # vid = torch.concat([img1[i,:][None,:],warp[None,:].cpu()],dim=0)
@@ -358,8 +369,8 @@ def go_through_samples():
         print(f'Processing sample {i+1}/{len(data_dict)}: {k}', end='\r')
 
         d = data_dict[k]
-        # if k!='v_BabyCrawling_g01_c04':
-        #     continue
+        if k!='v_SalsaSpin_g06_c04':
+            continue
         #consider only samples that are correcly predicted
         gt_class = d['motion_importance']['gt_class']
         print(f'Class: {gt_class}')
