@@ -233,14 +233,15 @@ def show_images_seq(img1, img2):
 
 from skimage.transform import resize
 
-def spacial_analysis(video, pairs, masks, clustered_ids):
-    FLOW_RATIO = 0.9
+def spacial_analysis(video, pairs, masks, clustered_ids, gt_class, pred_logit):
+    FLOW_RATIO = 1.0
+    gt_idx = class_labels[gt_class.lower()]
     ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
-    video = func.create_new_video(video.permute(1,0,2,3), clustered_ids, ordered_keys)
+    clus_video = func.create_new_video(video.permute(1,0,2,3).clone(), clustered_ids, ordered_keys)
+    video = video.permute(1,0,2,3)
     # func.play_tensor_video_opencv(video.permute(1,0,2,3),fps=2)
 
     #predict flow batch
-
     img1 = torch.empty(0)
     img2 = torch.empty(0)
     for pair in pairs:
@@ -250,41 +251,96 @@ def spacial_analysis(video, pairs, masks, clustered_ids):
         img2 = torch.concatenate([img2,i2_],dim=0)
     flow = raftof.predict_flow_batch(img2, img1)
     flow = raftof.resize_flow_interpolate(flow)
+
+    # warp = func.warp_batch(img1.to('cuda'),flow)
+    # i=0
+    # vid = torch.concat([img2[i,:][None,:],warp[i,:][None,:].cpu()],dim=0)
+    # func.play_tensor_video_opencv(vid.permute(0,2,3,1),fps=1)
+
     # raftof.visualize(img2,flow)
 
+    pair_imp = {}
     for i, pair in enumerate(pairs):
-        m = masks[pair[0]]
         f = flow[i,:]
+        m = masks[pair[0]]
+
+        vid = torch.concat([img1[i,:][None,:],img2[i,:][None,:].cpu()],dim=0)
+        func.play_tensor_video_opencv(vid.permute(0,2,3,1),fps=1)
+        
+        obj_imp = {}
         for oi in m.keys():
             obj_mask = m[oi]
-            # func.overlay_mask(img1[i,:].permute(1,2,0).numpy(), obj_mask.numpy())
 
-            fmag = torch.sum(f**2,dim=0)**0.5
-            # func.show_gray_image(fmag.cpu().numpy())
-            
-            #modify flow
+            # obj_mask = m[0] + m[1]
             fcopy = f.clone()
-            f_ = fcopy*FLOW_RATIO
-            fcopy[:,obj_mask] = f_[:,obj_mask]
+            fcopy[:,obj_mask] = f[:,obj_mask]*0.0
+            # fcopymag = torch.sum(fcopy**2,dim=0)**0.5
+            # func.show_gray_image(obj_mask.cpu().numpy()*1.0)
+            warp = func.warp_batch(img1[i,:][None,:].to('cuda'),fcopy)[0,:]
+            video_mod = func.replace_frame(clus_video, ordered_keys, clustered_ids, pair[1], warp)
+            l = func.get_pred_stats(model, video_mod.to('cuda'), gt_class=gt_idx, orig_pred_logit=pred_logit)['logit']
+            print(f'pair: {pair} object:{oi}, logit: {l}')
 
-            fcopymag = torch.sum(fcopy**2,dim=0)**0.5
-
-            img = torch.concat([torch.tensor(obj_mask)*1.0, fmag.cpu(), fcopymag.cpu()],dim=0)
-
-            #warp image to generate modified image
-            warp = func.warp_batch(img1[i,:][None,:].to('cuda'),fcopy)
-
-            m_ = obj_mask[None,:].repeat(3,1,1)
-            im1_ = img1[i,:]
-            im2_ = img2[i,:]
-            w_ = warp[0,:].cpu()
-            img_ = torch.concatenate([im1_,im2_,m_,w_], dim=2)
-            func.show_rgb_image(img_.permute(1,2,0).numpy())
+            # vid = torch.concat([img1[i,:][None,:],warp[None,:].cpu()],dim=0)
+            # func.play_tensor_video_opencv(vid.permute(0,2,3,1),fps=1)
 
 
+        # warp = func.warp_batch(img1[i,:][None,:].to('cuda'),f)[0,:]
+        # vid = torch.concat([img1[i,:][None,:],warp[None,:].cpu()],dim=0)
+        # func.play_tensor_video_opencv(vid.permute(0,2,3,1),fps=1)
+
+        # func.get_pred_stats(model, clus_video.to('cuda'))
+        # video_mod = func.replace_frame(clus_video, ordered_keys, clustered_ids, pair[1], warp)
+        # func.get_pred_stats(model, video_mod.to('cuda'))
 
 
-    pass
+
+
+
+
+
+
+        # m = masks[pair[0]]
+        # f = flow[i,:]
+        # obj_imp = {}
+        # for oi in m.keys():
+        #     obj_mask = m[oi]
+        #     # func.overlay_mask(img1[i,:].permute(1,2,0).numpy(), obj_mask.numpy())
+        #     # func.show_gray_image(obj_mask.cpu().numpy()*1.0)
+
+        #     # fmag = torch.sum(f**2,dim=0)**0.5
+        #     # func.show_gray_image(fmag.cpu().numpy())
+            
+        #     #modify flow
+        #     fcopy = f.clone()
+        #     f_ = fcopy*FLOW_RATIO
+        #     fcopy[:,obj_mask] = f_[:,obj_mask]
+
+        #     # fcopymag = torch.sum(fcopy**2,dim=0)**0.5
+
+        #     # img = torch.concat([torch.tensor(obj_mask)*1.0, fmag.cpu(), fcopymag.cpu()],dim=1)
+        #     # func.show_rgb_image(img.numpy())
+
+        #     #warp image to generate modified image
+        #     warp = func.warp_batch(img1[i,:][None,:].to('cuda'),f)[0,:]
+        #     # func.overlay_mask(img1[i,:].permute(1,2,0).numpy(), warp[0,:].cpu().numpy())
+        #     # func.overlay_mask(img1[i,:].permute(1,2,0).numpy(), img2[i,:].permute(1,2,0).numpy())
+
+        #     # vid = torch.concat([img1[i,:][None,:],img2[i,:][None,:]],dim=0)
+        #     vid = torch.concat([img2[i,:][None,:],warp[None,:].cpu()],dim=0)
+        #     func.play_tensor_video_opencv(vid.permute(0,2,3,1),fps=1)
+
+
+        #     video_mod = func.replace_frame(clus_video, ordered_keys, clustered_ids, pair[1], img2[i,:])
+        #     # func.get_pred_stats(model, video_mod.to('cuda'))
+        #     func.get_pred_stats(model, video_mod.to('cuda'), gt_idx, pred_logit)
+
+        #     ret = func.get_pred_stats(model, video_mod.to('cuda'), gt_idx, pred_logit)
+        #     imp = max(ret['per_change'], 0)
+        #     obj_imp[oi] = imp
+        # pair_imp[i] = obj_imp
+
+    return pair_imp
 
 
 def go_through_samples():
@@ -302,7 +358,7 @@ def go_through_samples():
         print(f'Processing sample {i+1}/{len(data_dict)}: {k}', end='\r')
 
         d = data_dict[k]
-        # if k!='v_ApplyEyeMakeup_g04_c03':
+        # if k!='v_BabyCrawling_g01_c04':
         #     continue
         #consider only samples that are correcly predicted
         gt_class = d['motion_importance']['gt_class']
@@ -368,7 +424,28 @@ def go_through_samples():
             
             
             masks = ucf101dm.load_masks(os.path.basename(mask_path))
-            spacial_analysis(video, pairs, masks, clustered_ids)
+            imp = spacial_analysis(video, pairs, masks, clustered_ids, gt_class, pred_logit)
+
+            for i,p in enumerate(pairs):
+                pair_imp = imp[i]
+                imp_max = max([pair_imp[p] for p in pair_imp])
+                imp_min = min([pair_imp[p] for p in pair_imp])
+                pair_imp_scaled = {}
+                for pkey in pair_imp:
+                    pair_imp_scaled[pkey] = (pair_imp[pkey] - imp_min)/(imp_max-imp_min)
+
+                img1 = video[p[0],:]
+                m = masks[p[0]]
+                hilight = torch.zeros(img1.size(1),img1.size(2))
+
+                for key in m.keys():
+                    hilight[m[key]] = int(pair_imp_scaled[key]*255)
+
+                func.show_gray_image(hilight.numpy())
+
+
+                
+            pass
 
             # video_ = func.create_new_video(video.permute(1,0,2,3), clustered_ids, ordered_keys)
             # heatmaps = spacial_analysis_perturb(video_, gt_class_idx, d['pair_analysis']['all_imp_pairs_logit'], ordered_keys, clustered_ids)

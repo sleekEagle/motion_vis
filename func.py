@@ -182,6 +182,27 @@ def play_tensor_video_opencv(tensor, fps=30, window_name="Video", titles=None):
     
     cv2.destroyAllWindows()
 
+
+'''
+prediction related
+'''
+def get_pred_stats(model, v, gt_class=None, orig_pred_logit=None):
+    ret = {}
+    with torch.no_grad():
+        pred = model(v.unsqueeze(0))
+    pred = F.softmax(pred,dim=1)
+    pred_cls = torch.argmax(pred,dim=1).item()
+    pred_logit = pred[:,pred_cls].item()
+    ret['pred_logit'] = pred_logit
+
+    if gt_class is not None:
+        logit = pred[:,gt_class].item()
+        per_change = (orig_pred_logit - logit)/orig_pred_logit
+        ret['per_change'] = per_change
+        ret['logit'] = logit
+
+    return ret
+
 #video shape : 3, t , h , w
 #where t is the number of frames
 from matplotlib import pyplot as plt
