@@ -243,7 +243,7 @@ may be edges are the most important features of the classifcation of the video. 
 2. 
 '''
 
-def spacial_analysis(video, pairs, masks, clustered_ids, gt_class, pred_logit):
+def spacial_analysis_objmask(video, pairs, masks, clustered_ids, gt_class, pred_logit):
     FLOW_RATIO = 1.0
     gt_idx = class_labels[gt_class.lower()]
     ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
@@ -292,6 +292,24 @@ def spacial_analysis(video, pairs, masks, clustered_ids, gt_class, pred_logit):
             print(f'pair: {pair} object:{oi}, logit: {l}')
 
     return pair_imp
+
+
+def spacial_analysis_dFdI(video, pairs, cluster_dict, gt_class_idx):
+    ordered_keys = cluster_dict['order']
+    clustered_ids = cluster_dict['clusters']
+    clus_video = func.create_new_video(video.permute(1,0,2,3).clone(), clustered_ids, ordered_keys)
+
+    gmodel = func.GradcamModel(model)
+    flow_sal = gmodel.calc_flow_saliency(clus_video.to('cuda'), cluster_dict, pairs, gt_class_idx, grad_method='sal')
+    dPred_dF = flow_sal[0]['dPred_dF']
+    dPred_dF_f = flow_sal[0]['dPred_dF*flow']
+    img = flow_sal[0]['img']
+
+    func.overlay_mask(img.permute(1,2,0).to('cpu'), dPred_dF_f.to('cpu'))
+
+    pass
+
+
 
 
 def go_through_samples():
@@ -354,28 +372,36 @@ def go_through_samples():
             ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
 
             #CHECK IF MASKS ALREADY GENERATED
-            maks_exist = False
-            mask_path = os.path.join(mask_out_path, gt_class, k)
-            if os.path.exists(mask_path):
-                if len(os.listdir(mask_path)) == 16:
-                    maks_exist = True
+            # maks_exist = False
+            # mask_path = os.path.join(mask_out_path, gt_class, k)
+            # if os.path.exists(mask_path):
+            #     if len(os.listdir(mask_path)) == 16:
+            #         maks_exist = True
             
-            if not maks_exist:
-                pass
-                masks = sam_ui.get_masks_from_ui(vid_path, display=True, n_frames=16, annot_frame=0)
-                os.makedirs(mask_path, exist_ok=True)
-                for i in range(len(masks)):
-                    fm=masks[i]
-                    f_path = os.path.join(mask_path, str(i))
-                    os.makedirs(f_path, exist_ok=True)
-                    for oi in range(len(fm)):
-                        om = fm[oi]
-                        o_path = os.path.join(f_path, f'{oi}.jpg')
-                        cv2.imwrite(o_path, om[0,:]*255)
+            # if not maks_exist:
+            #     pass
+            #     masks = sam_ui.get_masks_from_ui(vid_path, display=True, n_frames=16, annot_frame=0)
+            #     os.makedirs(mask_path, exist_ok=True)
+            #     for i in range(len(masks)):
+            #         fm=masks[i]
+            #         f_path = os.path.join(mask_path, str(i))
+            #         os.makedirs(f_path, exist_ok=True)
+            #         for oi in range(len(fm)):
+            #             om = fm[oi]
+            #             o_path = os.path.join(f_path, f'{oi}.jpg')
+            #             cv2.imwrite(o_path, om[0,:]*255)
             
             
-            masks = ucf101dm.load_masks(os.path.basename(mask_path))
-            imp = spacial_analysis(video, pairs, masks, clustered_ids, gt_class, pred_logit)
+            # masks = ucf101dm.load_masks(os.path.basename(mask_path))
+            # imp = spacial_analysis(video, pairs, masks, clustered_ids, gt_class, pred_logit)
+
+            frame_ids = func.get_cluster_frameids(clustered_ids, ordered_keys)
+            d = {}
+            d['clusters'] = clustered_ids
+            d['order'] = ordered_keys
+            d['frame_ids'] = frame_ids
+            cluster_dict = d
+            spacial_analysis_dFdI(video, pairs, cluster_dict, gt_class_idx)
 
             for i,p in enumerate(pairs):
                 pair_imp = imp[i]

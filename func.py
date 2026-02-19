@@ -330,12 +330,8 @@ def dI_df(img0, img1, flow):
     delta_y = f_delta.clone()
     delta_y[:,:,0] = 0
 
-    if flow.size(0) != img0.size(2):
-        img0 = F.interpolate(img0, size=(flow.size(0), flow.size(0)), mode='bilinear', align_corners=False)
-        img1 = F.interpolate(img1, size=(flow.size(0), flow.size(0)), mode='bilinear', align_corners=False)
-
-    warped_x = warp_video(img0, (flow+delta_x).unsqueeze(0))
-    warped_y = warp_video(img0, (flow+delta_y).unsqueeze(0))
+    warped_x = warp_batch(img0, (flow+delta_x).permute(2,0,1).unsqueeze(0))
+    warped_y = warp_batch(img0, (flow+delta_y).permute(2,0,1).unsqueeze(0))
     dI_x = (warped_x - img1) / delta_x[:,:,0][None,None,:,:]
     dI_y = (warped_y - img1) / delta_y[:,:,1][None,None,:,:]
     d = torch.concat([dI_x[:,:,:,:,None],dI_y[:,:,:,:,None]],dim=-1)
@@ -392,6 +388,17 @@ def get_motion_pairs(ids):
         pairs.append((keys[idx], keys[idx+1]))
 
     return pairs
+
+def get_cluster_frameids(cluster_ids, order_ids):
+    frame_ids = {}
+    idx=0
+    for i in order_ids:
+        idx_ar = []
+        for val in cluster_ids[i]:
+            idx_ar.append(idx)
+            idx+=1
+        frame_ids[i] = idx_ar
+    return frame_ids
 
 import numpy as np
 import torch
@@ -760,14 +767,21 @@ class GradcamModel(nn.Module):
         cam_int = (cam_int - cam_int.min())/(cam_int.max() - cam_int.min() + 1e-5)
         return cam_int
     
-    def calc_raft_of(self, x, frame_pairs):
+    def calc_raft_of(self, x, cluster_dict, frame_pairs):
+
+        order_ids = cluster_dict['order']
+        cluster_ids = cluster_dict['clusters']
+        frame_ids = cluster_dict['frame_ids']
 
         img1_batch, img2_batch = torch.empty(0), torch.empty(0)
         img1_batch, img2_batch = img1_batch.to('cuda'), img2_batch.to('cuda')
 
         for f in frame_pairs:
-            img1_ = x[:,:,f[0],:]
-            img2_ = x[:,:,f[1],:]
+            idx0 = frame_ids[str(f[0])][0]
+            idx1 = frame_ids[str(f[1])][0]
+
+            img1_ = x[:,idx0,:][None,:]
+            img2_ = x[:,idx1,:][None,:]
             img1_batch = torch.concat([img1_batch,img1_],dim=0)
             img2_batch = torch.concat([img2_batch,img2_],dim=0)
         
@@ -781,31 +795,44 @@ class GradcamModel(nn.Module):
                 sal: saliency (raw gradient)
                 gradcam: using gradcam
     '''
-    def calc_flow_saliency(self, x, frame_pairs, grad_method='sal'):
+    def calc_flow_saliency(self, x, cluster_dict, frame_pairs, gt_class_idx, grad_method='sal'):
+        x.requires_grad_(True)
+        pred = self.forward(x[None,:])
+        pred_logit = pred[:,gt_class_idx]
+        pred_logit.backward()
+        x.requires_grad_(False)
+
         if self.of_method == 'raft':
-            flow = self.calc_raft_of(x, frame_pairs)
+            flow = self.calc_raft_of(x, cluster_dict, frame_pairs)
         else:
             #calculate OF in the classical method
             pass
 
+        frame_ids = cluster_dict['frame_ids']
         ret = {}
-
         for idx, p in enumerate(frame_pairs):
             f = flow[idx,:].permute(1,2,0)
             d={}
+            idx0 = frame_ids[str(p[0])][0]
+            idx1 = frame_ids[str(p[1])][0]
 
             # mag = torch.sum(f**2, dim=-1)**0.5
             # plt.imshow(mag.detach().cpu().numpy(), cmap='hot', alpha=0.5)
             # plt.show(block=True)
+            img0 = x[:,idx0,:][None,:]
+            img1 = x[:,idx1,:][None,:]
+            if flow.size(2) != img0.size(2):
+                img0 = F.interpolate(img0, size=(flow.size(2), flow.size(2)), mode='bilinear', align_corners=False)
+                img1 = F.interpolate(img1, size=(flow.size(2), flow.size(2)), mode='bilinear', align_corners=False)
             
-            dI_dF = dI_df(x[:,:,p[0],:], x[:,:,p[1],:], f)[0,:]
+            dI_dF = dI_df(img0, img1, f)[0,:]
 
             if grad_method=='sal':
-                slc,_ = torch.max(x.grad ,dim=1)
-                slc = slc[:,p[1],:]
+                slc,_ = torch.max(x.grad ,dim=0)
+                slc = slc[idx1,:]
                 if slc.size(1) != f.size(0):
-                    slc = F.interpolate(slc[:,None,:], size=(f.size(0), f.size(0)), mode='bilinear', align_corners=False)
-                    slc = slc[0,0,:][:,:,None]
+                    slc = F.interpolate(slc[None,None,:], size=(f.size(0), f.size(0)), mode='bilinear', align_corners=False)
+                    slc = slc[0,0,:]
                 grad = slc
                 d['slc'] = slc
 
@@ -817,7 +844,7 @@ class GradcamModel(nn.Module):
                 grad = gcam
                 d['gcam'] = gcam
 
-            dPred_dF = grad * dI_dF
+            dPred_dF = grad[:,:,None] * dI_dF
             dPred_dF =  F.relu(dPred_dF)
             dPred_dF = torch.sum(dPred_dF**2, dim=2)**0.5
             dPred_dF[:5,:] = 0
@@ -833,7 +860,8 @@ class GradcamModel(nn.Module):
                 'dPred_dF': dPred_dF,
                 'dPred_dF*flow': dPred_dF*f_mag,
                 'flow': f,
-                'flow_mag': f_mag
+                'flow_mag': f_mag,
+                'img': img0[0,:]
             }
 
             ret[idx] = d
