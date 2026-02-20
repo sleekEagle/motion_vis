@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from torchcodec.decoders import VideoDecoder
 from transformers import AutoVideoProcessor, AutoModelForVideoClassification
+from transformers import VideoMAEImageProcessor, VideoMAEForVideoClassification
 from pathlib import Path
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -9,22 +10,25 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 class VJEPA2:
     def __init__(self):
         # Load model and video preprocessor
-        hf_repo = "facebook/vjepa2-vitl-fpc16-256-ssv2"
 
-        self.model = AutoModelForVideoClassification.from_pretrained(hf_repo).to(device)
-        self.processor = AutoVideoProcessor.from_pretrained(hf_repo)
+        self.processor = VideoMAEImageProcessor.from_pretrained("MCG-NJU/videomae-base-finetuned-ssv2")
+        self.model = VideoMAEForVideoClassification.from_pretrained("MCG-NJU/videomae-base-finetuned-ssv2")
+
+        # self.model = AutoModelForVideoClassification.from_pretrained(hf_repo).to(device)
+        # self.processor = AutoVideoProcessor.from_pretrained(hf_repo)
+
         id2label = self.model.config.id2label
         label2id={}
         for k in id2label:
             text = id2label[k]
-            text_mod = text.replace('[','').replace(']','')
+            text_mod = text.replace('[','').replace(']','').replace('\'','')
             label2id[text_mod] = k
         self.label2id = label2id
         self.id2label = self.model.config.id2label
 
     def video_from_path(self, path):
         vr = VideoDecoder(path)
-        frame_idx = np.arange(0, self.model.config.frames_per_clip, 1) # you can define more complex sampling strategy
+        frame_idx = np.arange(0, self.model.config.frames_per_clip, 8) # you can define more complex sampling strategy
         video = vr.get_frames_at(indices=frame_idx).data  # frames x channels x height x width
         inputs = self.processor(video, return_tensors="pt").to(self.model.device)
         return inputs
