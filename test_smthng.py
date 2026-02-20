@@ -14,6 +14,11 @@ class VJEPA2:
 
         self.processor = VideoMAEImageProcessor.from_pretrained("MCG-NJU/videomae-base-finetuned-ssv2")
         self.model = VideoMAEForVideoClassification.from_pretrained("MCG-NJU/videomae-base-finetuned-ssv2").to(device)
+        label2id_ = self.model.config.label2id
+        self.label2id = {}
+        for k in label2id_:
+            new_k = k.replace('[','').replace(']','').replace('\'','')
+            self.label2id[new_k] = label2id_[k]
 
     def sample_frames(self, video_path, num_frames=16):
         decoder = VideoDecoder(video_path)
@@ -34,20 +39,31 @@ class VJEPA2:
         pred = outputs.logits.argmax(-1).item()
         return pred
     
+'''
+Accuracy = 69.18 % 
+'''
 def test_s2s():
     model = VJEPA2()
     model.model.eval()
 
+    cls_names = list(model.label2id.keys())
+    
     path = Path(r'C:\Users\lahir\Downloads\s2s_test')
-    n_files = len([p for p in path.rglob("*") if p.is_file()])
+    dirs = [p.name for p in path.iterdir() if p.is_dir()]
+
+    #make sure all the class names are present in the list of dirs
+    for c in cls_names:
+        assert c in dirs , f'{c} is not in the list of dirs'
+        pass
+
     dirs = [p for p in path.iterdir() if p.is_dir()]
+    n_files = len([p for p in path.rglob("*") if p.is_file()])
 
     n_correct = 0
     n_samples = 0
     for dir in dirs:
         d_name = dir.name
-        d_name = d_name.replace("something", "[something]")
-        gt_idx = model.model.config.label2id[d_name]
+        gt_idx = model.label2id[d_name]
         files = [p for p in dir.iterdir() if p.is_file()]
 
         for file in files:
@@ -62,4 +78,5 @@ def test_s2s():
 
 if __name__ == '__main__':
     test_s2s()
+
 
