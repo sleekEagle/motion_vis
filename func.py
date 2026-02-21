@@ -404,6 +404,35 @@ def get_cluster_frameids(cluster_ids, order_ids):
         frame_ids[i] = idx_ar
     return frame_ids
 
+'''
+generate new cluster id given idx list
+this uses temporal freezing. 
+The first occurance of each frame is not changed
+A frame is repeated until the next viable frames is found
+'''
+def temporal_freeze(idx_list, len_array=16):
+    assert len(idx_list) > 0 , "idx_list must contain at least one index."
+    max_idx = max(idx_list)
+    assert max_idx < len_array, "max value in idx_list must not be larger than len_array"
+
+    idx_list.sort()
+    d = {}
+    if len(idx_list) == 1:
+        d[idx_list[0]] = [idx_list[0]]*len_array
+        return d
+
+    d[idx_list[0]] = [idx_list[0]]*(idx_list[1])
+    for i in range(1, len(idx_list)-1):
+        d[idx_list[i]] = [idx_list[i]]*(idx_list[i+1]-idx_list[i])
+    d[idx_list[-1]] = [idx_list[-1]]*(len_array - idx_list[-1])
+    ordered_keys = list(dict(sorted(d.items(), key=lambda x: x[1][0])).keys())
+
+    clusters = {}
+    clusters['cluster_ids'] = d
+    clusters['ordered_keys'] = ordered_keys
+    
+    return clusters
+
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
