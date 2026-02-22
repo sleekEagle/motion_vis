@@ -207,6 +207,21 @@ def get_pred_stats(model, v, gt_class=None, orig_pred_logit=None):
 
     return ret
 
+'''
+shuffle the given video based on the clustered_ids and the given combinations and get the avg predions
+'''
+def get_avg_pred(model, video, clustered_ids, combinations):
+    #create video with the solutions
+    comb_vids = torch.empty(0).to(video.device)
+    for comb in combinations:
+        comb_vid = create_new_video(video, clustered_ids, comb)
+        comb_vids = torch.concatenate([comb_vids,comb_vid.unsqueeze(0)])
+
+    pred_comb = model(comb_vids).mean(dim=0)
+    pred_comb = F.softmax(pred_comb.unsqueeze(0),dim=1)
+
+    return pred_comb
+
 #video shape : 3, t , h , w
 #where t is the number of frames
 from matplotlib import pyplot as plt
@@ -419,12 +434,11 @@ def temporal_freeze(idx_list, len_array=16):
     d = {}
     if len(idx_list) == 1:
         d[idx_list[0]] = [idx_list[0]]*len_array
-        return d
-
-    d[idx_list[0]] = [idx_list[0]]*(idx_list[1])
-    for i in range(1, len(idx_list)-1):
-        d[idx_list[i]] = [idx_list[i]]*(idx_list[i+1]-idx_list[i])
-    d[idx_list[-1]] = [idx_list[-1]]*(len_array - idx_list[-1])
+    else:
+        d[idx_list[0]] = [idx_list[0]]*(idx_list[1])
+        for i in range(1, len(idx_list)-1):
+            d[idx_list[i]] = [idx_list[i]]*(idx_list[i+1]-idx_list[i])
+        d[idx_list[-1]] = [idx_list[-1]]*(len_array - idx_list[-1])
     ordered_keys = list(dict(sorted(d.items(), key=lambda x: x[1][0])).keys())
 
     clusters = {}
@@ -432,6 +446,87 @@ def temporal_freeze(idx_list, len_array=16):
     clusters['ordered_keys'] = ordered_keys
     
     return clusters
+
+'''
+Monte-Carlo method to fill the array and avoid the forbidden pairs
+'''
+import random
+def sample_fill_array(
+    original,
+    numbers,
+    pairs_to_avoid,
+    max_solutions=10,
+    max_trials=10_000,
+    forbid_reverse=False,
+    seed=None,
+):
+    
+    orig_num = [n for n in original if n is not None]
+    assert len([n for n in orig_num if n in numbers])==0, "Error. Original array contains numbers that are in the given number set."
+    assert len(original) == len(orig_num)+len(numbers), "Error. The number of None entries in original_array must be equal to the number of given numbers + numer of non None elements in the origincal array"
+
+
+    if seed is not None:
+        random.seed(seed)
+
+    forbidden = set(pairs_to_avoid)
+    if forbid_reverse:
+        forbidden |= {(b, a) for (a, b) in pairs_to_avoid}
+
+    n = len(original)
+    fixed = original[:]
+    fixed_vals = {x for x in fixed if x is not None}
+    free_positions = [i for i, x in enumerate(fixed) if x is None]
+    available = [x for x in numbers if x not in fixed_vals]
+
+    #handle special cases seperately
+    skip_indices = [i for i, val in enumerate(original) if val is not None]
+    valid_indices = [i for i in range(n) if i not in skip_indices]
+    valid_indices.sort()
+    if len(original)==3 and len(fixed_vals)==2:
+        if valid_indices[0]==2:
+            if (original[1],numbers[0]) in pairs_to_avoid:
+                ret_array = [numbers[0],original[0],original[1]]
+            else:
+                ret_array = [original[0],original[1],numbers[0]]
+        if valid_indices[0]==0:
+            if (numbers[0],original[1]) in pairs_to_avoid:
+                ret_array = [original[1],original[2],numbers[0]]
+            else:
+                ret_array = [numbers[0],original[1],original[2]]
+        return [ret_array]
+
+
+    solutions = []
+    seen = set()
+
+    def is_valid(arr):
+        for i in range(n - 1):
+            if (arr[i], arr[i + 1]) in forbidden:
+                return False
+        return True
+
+    for _ in range(max_trials):
+        if len(solutions) >= max_solutions:
+            break
+
+        random.shuffle(available)
+        candidate = fixed[:]
+
+        for pos, val in zip(free_positions, available):
+            candidate[pos] = val
+
+        if not is_valid(candidate):
+            continue
+
+        key = tuple(candidate)
+        if key in seen:
+            continue
+
+        seen.add(key)
+        solutions.append(candidate)
+
+    return solutions
 
 import numpy as np
 import torch
