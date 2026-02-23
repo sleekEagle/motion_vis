@@ -1,29 +1,13 @@
-from argparse import Namespace
 import json
 from models.resnet3d.main import generate_model, get_inference_utils, resume_model
 from models.resnet3d.model import generate_model, make_data_parallel
 from pathlib import Path
 import torch
-from models.resnet3d import spatial_transforms
-from torchvision.transforms import transforms
-from torchvision.transforms.transforms import Normalize, ToPILImage
-import os
-import re
 from glob import glob
-from PIL import Image
 import numpy as np
-import torch.nn as nn
 import torch.nn.functional as F
-import cv2
-from torchvision import models, transforms
-from torchvision.models import resnet50, ResNet50_Weights
 from torchvision.models.feature_extraction import create_feature_extractor
-from sklearn.cluster import DBSCAN
-from einops import rearrange
-import csv
-import pandas as pd
 import func
-
 
 #create model and data loader
 ucf101dm = func.UCF101_data_model()
