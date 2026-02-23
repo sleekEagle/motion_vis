@@ -159,23 +159,6 @@ def sample_fill_array(
 
     return solutions
 
-
-'''
-usage:
-
-original = [None, None, 3, 4, None, None, None]
-numbers = [1, 2, 5, 10, 12]
-pairs_to_avoid = [(1,2), (2,5), (10,12)]
-
-solutions = sample_fill_array(
-    original,
-    numbers,
-    pairs_to_avoid,
-    max_solutions=5,
-    max_trials=5000
-)
-'''
-
 def get_uniqueval_indices(ids):
     unique_ids = np.unique(list(ids.keys()))
     args = [np.argwhere(ids==id) for id in unique_ids]
@@ -183,7 +166,6 @@ def get_uniqueval_indices(ids):
     for i, id in enumerate(unique_ids):
         cluster_ids[id.item()] = [int(i) for i in args[i][:,0]]
     return cluster_ids
-
 
 
 change_threshold = 0.02
