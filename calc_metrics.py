@@ -182,70 +182,118 @@ def motion_metrics(video, d, gt_class_idx, pred_logit):
                 max_solutions=20,
                 max_trials=5000
             )
+        
+def is_valid(arr, forbidden_pairs):
+    for i in range(len(arr) - 1):
+        if [arr[i], arr[i + 1]] in forbidden_pairs:
+            return False
+    return True
 
-def sample_fill_array(numbers, existing, forbidden_pairs, seed=None, max_solutions=10, max_trials=10000):
+def contains_sublist(lst, sublist):
+    n = len(sublist)
+    return any(sublist == lst[i:i+n] for i in range(len(lst) - n + 1))
+
+def sample_fill_array(numbers, existing, forbidden_pairs, seed=None, max_solutions=100, max_trials=10000):
+
+    for ex in existing:
+        assert ex not in forbidden_pairs, 'Error: pairs in the existing cannot be there in the forbidden_pairs'
+
 
     flat = [item for sublist in existing for item in sublist]
-    out_len = len(flat) + len(numbers)
     assert len([n for n in numbers if n in flat])==0, 'any number in numbers must not be present in existing'
 
     if seed is not None:
         random.seed(seed)
     
-    solutions = []
-    seen = set()
+    solutions = set()
 
-    new_list = existing.copy()
+    #merge suitable items from the existing list
+    new_existing = existing.copy()
     i=0
-    while i < len(new_list):
-        p = new_list[i]
-        rest = [item for item in new_list if item!=p]
+    while i < len(new_existing):
+        p = new_existing[i]
+        rest = [item for item in new_existing if item!=p]
         found=False
         for r in rest:
             assert not(r[0]==p[-1] and r[-1]==p[0]), 'invalid combinations'
             if r[0]==p[-1]:
-                new_comb = list(set(r + p))
+                new_comb = list(dict.fromkeys(p + r))
                 rest_rest = [item for item in rest if item!=r]
-                new_list = [new_comb]+rest_rest
+                new_existing = [new_comb]+rest_rest
                 found=True
                 break
             if r[-1]==p[0]:
-                new_comb = list(set(r + p))
+                new_comb = list(dict.fromkeys(r + p))
                 rest_rest = [item for item in rest if item!=r]
-                new_list = [new_comb]+rest_rest
+                new_existing = [new_comb]+rest_rest
                 found=True
                 break
         if found:
             continue
         i+=1
-    existing = new_list
-
-    def is_valid(arr):
-        for i in range(len(arr)-1):
-            if (arr[i], arr[i + 1]) in forbidden_pairs:
-                return False
-        return True
     
     for _ in range(max_trials):
         if len(solutions) >= max_solutions:
             break
-        #place existing pairs in the array
-        array = [None]*out_len
-        idx_arr = list(range(out_len))
-        for idx in range(len(existing)):
-            avail = False
-            while not avail:
-                l = len(existing[idx])
-                i = random.sample(idx_arr[:-l+1],1)[0]
-                avail = bool(np.array([idx_ in idx_arr for idx_ in range(i,i+l+1)]).all())
+        #calculate output length
+        e_ = [e_ for e in new_existing for e_ in e]
+        l_existing = len(e_)
+        assert len([e for e in e_ if e in numbers])==0, 'Error: there is an overlap between existing and the new numbers to fill.'
+        l_out = l_existing + len(numbers)
 
-            for e_idx, e in enumerate(existing[idx]):
-                array[i+e_idx] = existing[idx][e_idx]
-                idx_arr.remove(i+e_idx)
 
+        #fill existing numbers
+        #*******
+        array = [None]*l_out
+        filled = len([a for a in array if a != None])
+
+        while filled < l_existing:
+            array = [None]*l_out
+            for i_ex in range(len(new_existing)):
+                l = len(new_existing[i_ex])
+
+                #get available indices to fill
+                idx_none = [i for i,a in enumerate(array) if a == None]
+                idx_free = []
+                for idx in idx_none:
+                    avail = True
+                    for add in range(l):
+                        if (idx+add) not in idx_none:
+                            avail = False
+                            break
+                    if avail: idx_free.append(idx)
+                idx_sample = random.sample(idx_free,1)[0]
+                for idx_e_, e in enumerate(new_existing[i_ex]):
+                    array[idx_sample+idx_e_] = new_existing[i_ex][idx_e_]
+            filled = len([a for a in array if a != None])
+        assert filled == l_existing, 'Error, Cannot fill all the existing numbers!'
+        #*******
+        
         #fill the rest of the array with the given numbers
+        avail_idx = [i for i,val in enumerate(array) if val is None]
+        random.shuffle(avail_idx)
+        for idx, ai in enumerate(avail_idx):
+            array[ai] = numbers[idx]
+        
+        #check if there are forbidden pairs in the solution
 
-    pass
+        
+        if not is_valid(array, forbidden_pairs):
+            continue
+        
+        key = tuple(array)
+        if key in solutions:
+            continue
+        solutions.add(key)
+    
+    #check solution
+    for s in solutions:
+        assert is_valid(s, forbidden_pairs), 'Error: A solution with a fobidden pair found!'
+    for s in solutions:
+        for ex in existing:
+            assert contains_sublist(list(s), ex), f'Items in the existing list is not present in a solution {s}'
+    
+    return solutions
 
 import random
 def sample_fill_array_(
@@ -309,7 +357,6 @@ def sample_fill_array_(
 
         random.shuffle(available)
         candidate = fixed[:]
-
         for pos, val in zip(free_positions, available):
             candidate[pos] = val
 
@@ -327,10 +374,11 @@ def sample_fill_array_(
     
 
 if __name__ == '__main__':
-    forbidden_pairs = [[1,3],[5,8],[10,12]]
-    numbers = [0,1,2,3,6,8,9,10,11,12,15]
-    existing = [[4,5],[13,14],[5,7]]
-    sample_fill_array(numbers, existing, forbidden_pairs)
+    forbidden_pairs = [[3,1],[4,5],[6,9]]
+    numbers = [1,3,4,5,6,7,8,9,11,13,14]
+    existing = [[0,2],[10,12],[2,10],[12,15]]
+    solutions = sample_fill_array(numbers, existing, forbidden_pairs)
+        
     # with open(analysis_path, 'r', encoding='utf-8') as file:
     #     data_dict = json.load(file)
     
