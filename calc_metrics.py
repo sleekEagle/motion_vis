@@ -159,7 +159,6 @@ def motion_metrics(video, d, gt_class_idx, pred_logit):
         keep_pairs_flat = [p_ for p in keep_pairs for p_ in p]
         num = [n for n in numbers if n not in keep_pairs_flat]
         solutions = func.sample_fill_array(num, keep_pairs, forbidden_pairs)
-        solutions = [list(s) for s in solutions]
         p = func.get_avg_pred(model, video, clustered_ids, solutions)
         l = p[:,gt_class_idx]
         logits.append(l.item())
@@ -169,68 +168,26 @@ def motion_metrics(video, d, gt_class_idx, pred_logit):
     AUC_insert = float(np.trapezoid(logits, x))
     metrics['AUC_insert'] = AUC_insert
 
-    #deletion test. Start with no motion, add one motion pair one by one
-    pass
+    #deletion test. Start with all motion pairs, add delete one motion pair one by one
+    ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
+    v = func.create_new_video(video, clustered_ids, ordered_keys)
+    stats = func.get_pred_stats(model, v, gt_class_idx, pred_logit)
 
-    
-
-
-
-
+    logits = [stats['logit']]
+    for i in range(len(pairs_sort)):
+        remove_pairs = pairs_sort[:i+1]
+        keep_pairs = [p for p in pairs_sort if p not in remove_pairs]
+        keep_pairs_flat = [p_ for p in keep_pairs for p_ in p]
+        num = [n for n in numbers if n not in keep_pairs_flat]
+        solutions = func.sample_fill_array(num, keep_pairs, remove_pairs)
+        p = func.get_avg_pred(model, video, clustered_ids, solutions)
+        l = p[:,gt_class_idx]
+        logits.append(l.item())
+    x = np.linspace(0, 1, len(logits))
+    AUC_delete = float(np.trapezoid(logits, x))
+    metrics['AUC_delete'] = AUC_delete
         
-
-
-
-
-
-
-
-    nums = [int(k) for k in clustered_ids.keys()]
-    original = [None]*len(nums)
-    fobbiden_pairs = [(int(p[0]),int(p[1])) for p in pairs]
-    combinations = func.sample_fill_array(original, nums, fobbiden_pairs,
-                max_solutions=20,
-                max_trials=5000
-            )
-    # test combinations for forbidden pairs
-    for comb in combinations:
-        for i in range(len(comb)-1):
-            p = (comb[i],comb[i+1])
-            assert p not in fobbiden_pairs, 'pair detected'
-
-    pred = func.get_avg_pred(model, video.permute(1,0,2,3), clustered_ids, combinations)
-    logit_nomotion = pred[:,gt_class_idx]
-
-
-
-    vals = list(clustered_ids.keys())
-
-    for i in range(0,len(pairs_sort)):
-        vals_ = vals.copy()
-        sel_pairs = pairs_sort[:i+1]
-        forbidden_pairs = pairs_sort[i+1:]
-
-        vals_to_use = []
-        for v in vals_:
-            present = False
-            for s in forbidden_pairs:
-                if v in s:
-                    present = True
-            if not present:
-                vals_to_use.append(v)
-        
-        for val in vals_to_use:
-            idx = int(np.argwhere(np.array(vals)==val)[0,0])
-            vals_[idx] = None
-
-        for i in not_nan_idx:
-            vals_[i] = None
-        fill_numbers = [c for c in vals if c not in vals_]
-        fobbiden_pairs_ = [p for p in pairs if p != pair]
-        combinations = func.sample_fill_array(vals_, fill_numbers, fobbiden_pairs_,
-                max_solutions=20,
-                max_trials=5000
-            )
+    return metrics
     
 
 if __name__ == '__main__':

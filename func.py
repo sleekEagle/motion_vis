@@ -653,6 +653,7 @@ def sample_fill_array(numbers, existing, forbidden_pairs, seed=None, max_solutio
         for ex in existing:
             assert contains_sublist(list(s), ex), f'Items in the existing list is not present in a solution {s}'
     
+    solutions = [list(s) for s in solutions]
     return solutions
 
 
