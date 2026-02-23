@@ -217,7 +217,8 @@ def get_avg_pred(model, video, clustered_ids, combinations):
         comb_vid = create_new_video(video, clustered_ids, comb)
         comb_vids = torch.concatenate([comb_vids,comb_vid.unsqueeze(0)])
 
-    pred_comb = model(comb_vids).mean(dim=0)
+    with torch.no_grad():
+        pred_comb = model(comb_vids).mean(dim=0)
     pred_comb = F.softmax(pred_comb.unsqueeze(0),dim=1)
 
     return pred_comb
@@ -449,9 +450,10 @@ def temporal_freeze(idx_list, len_array=16):
 
 '''
 Monte-Carlo method to fill the array and avoid the forbidden pairs
+give fixed existing pairs with already initialized array
 '''
 import random
-def sample_fill_array(
+def sample_fill_array_fixed_pos(
     original,
     numbers,
     pairs_to_avoid,
@@ -527,6 +529,135 @@ def sample_fill_array(
         solutions.append(candidate)
 
     return solutions
+
+def is_valid(arr, forbidden_pairs):
+    for i in range(len(arr) - 1):
+        if [arr[i], arr[i + 1]] in forbidden_pairs:
+            return False
+    return True
+
+def contains_sublist(lst, sublist):
+    n = len(sublist)
+    return any(sublist == lst[i:i+n] for i in range(len(lst) - n + 1))
+
+'''
+Monte-Carlo method to fill the array and avoid the forbidden pairs
+pairs can occupy any position. not fixed
+'''
+def sample_fill_array(numbers, existing, forbidden_pairs, seed=None, max_solutions=100, max_trials=10000):
+
+    for ex in existing:
+        assert ex not in forbidden_pairs, 'Error: pairs in the existing cannot be there in the forbidden_pairs'
+
+
+    flat = [item for sublist in existing for item in sublist]
+    assert len([n for n in numbers if n in flat])==0, 'any number in numbers must not be present in existing'
+
+    if seed is not None:
+        random.seed(seed)
+    
+    solutions = set()
+
+    #merge suitable items from the existing list
+    new_existing = existing.copy()
+    i=0
+    while i < len(new_existing):
+        p = new_existing[i]
+        rest = [item for item in new_existing if item!=p]
+        found=False
+        for r in rest:
+            assert not(r[0]==p[-1] and r[-1]==p[0]), 'invalid combinations'
+            if r[0]==p[-1]:
+                new_comb = list(dict.fromkeys(p + r))
+                rest_rest = [item for item in rest if item!=r]
+                new_existing = [new_comb]+rest_rest
+                found=True
+                break
+            if r[-1]==p[0]:
+                new_comb = list(dict.fromkeys(r + p))
+                rest_rest = [item for item in rest if item!=r]
+                new_existing = [new_comb]+rest_rest
+                found=True
+                break
+        if found:
+            continue
+        i+=1
+    
+    for _ in range(max_trials):
+        if len(solutions) >= max_solutions:
+            break
+        #calculate output length
+        e_ = [e_ for e in new_existing for e_ in e]
+        l_existing = len(e_)
+        assert len([e for e in e_ if e in numbers])==0, 'Error: there is an overlap between existing and the new numbers to fill.'
+        l_out = l_existing + len(numbers)
+
+
+        #fill existing numbers
+        #*******
+        array = [None]*l_out
+        filled = len([a for a in array if a != None])
+
+        # random.shuffle(new_existing)
+        while filled < l_existing:
+            array = [None]*l_out
+            not_found=False
+            for i_ex in range(len(new_existing)):
+                l = len(new_existing[i_ex])
+
+                #get available indices to fill
+                idx_none = [i for i,a in enumerate(array) if a == None]
+                random.shuffle(idx_none)
+                idx_free = []
+                for idx in idx_none:
+                    avail = True
+                    for add in range(l):
+                        if (idx+add) not in idx_none:
+                            avail = False
+                            break
+                    if avail: idx_free.append(idx)
+                if len(idx_free) == 0: # no solution found : retry
+                    not_found = True
+                    break
+                if not not_found:
+                    idx_sample = random.sample(idx_free,1)[0]
+                    for idx_e_, e in enumerate(new_existing[i_ex]):
+                        array[idx_sample+idx_e_] = new_existing[i_ex][idx_e_]
+            if not not_found:
+                filled = len([a for a in array if a != None])
+
+        assert filled == l_existing, 'Error, Cannot fill all the existing numbers!'
+        #*******
+        
+        #fill the rest of the array with the given numbers
+        avail_idx = [i for i,val in enumerate(array) if val is None]
+        random.shuffle(avail_idx)
+        for idx, ai in enumerate(avail_idx):
+            array[ai] = numbers[idx]
+        
+        #check if there are forbidden pairs in the solution
+
+        
+        if not is_valid(array, forbidden_pairs):
+            continue
+        
+        key = tuple(array)
+        if key in solutions:
+            continue
+        solutions.add(key)
+    
+    #check solution
+    for s in solutions:
+        assert is_valid(s, forbidden_pairs), 'Error: A solution with a fobidden pair found!'
+    for s in solutions:
+        for ex in existing:
+            assert contains_sublist(list(s), ex), f'Items in the existing list is not present in a solution {s}'
+    
+    return solutions
+
+
+# sol = sample_fill_array([0,2,3,4,6,7,8,10,11,12], [[1,5],[9,15]] ,[[5,8],[0,2]])
+# pass
 
 import numpy as np
 import torch

@@ -121,13 +121,70 @@ def structure_metrics(video, d, gt_class_idx, pred_logit):
 
 def motion_metrics(video, d, gt_class_idx, pred_logit):
     metrics = {}
+
     clustered_ids = d['pair_analysis']['clustered_ids']
     dict_ = {}
     for k in clustered_ids:
         dict_[int(k)] = clustered_ids[k]
     clustered_ids = dict_
+    video = video.permute(1,0,2,3)
+    v = func.create_new_video(video, clustered_ids)
+    stats = func.get_pred_stats(model, v, gt_class_idx, pred_logit)
 
-    pairs = func.get_motion_pairs(clustered_ids)
+    l = stats['logit']
+
+    #sort pairs according to importance
+    p_imp = d['pair_analysis']['pair_importance']
+    p_ = [p[0] for p in p_imp]
+    p_imp_= [p[1] for p in p_imp]
+    if p_[0]==[None,None]:
+        p_ = p_[1:]
+        p_imp_ = p_imp_[1:]
+
+    sort_args = np.argsort(-1*np.array(p_imp_))
+    pairs_sort = np.array(p_)[sort_args].tolist()
+
+    #insertion test. Start with no motion, add one motion pair one by one
+    numbers = list(clustered_ids.keys())
+    forbidden_pairs = pairs_sort
+    solutions = func.sample_fill_array(numbers, [], forbidden_pairs)
+    with torch.no_grad():
+        pred = func.get_avg_pred(model, video, clustered_ids, solutions)
+    logit_rand = [pred[:,gt_class_idx].item()]
+
+    logits = []
+    for i in range(len(pairs_sort)):
+        keep_pairs = pairs_sort[:i+1]
+        forbidden_pairs = pairs_sort[i+1:]
+        keep_pairs_flat = [p_ for p in keep_pairs for p_ in p]
+        num = [n for n in numbers if n not in keep_pairs_flat]
+        solutions = func.sample_fill_array(num, keep_pairs, forbidden_pairs)
+        solutions = [list(s) for s in solutions]
+        p = func.get_avg_pred(model, video, clustered_ids, solutions)
+        l = p[:,gt_class_idx]
+        logits.append(l.item())
+
+    logits = logit_rand + logits
+    x = np.linspace(0, 1, len(logits))
+    AUC_insert = float(np.trapezoid(logits, x))
+    metrics['AUC_insert'] = AUC_insert
+
+    #deletion test. Start with no motion, add one motion pair one by one
+    pass
+
+    
+
+
+
+
+        
+
+
+
+
+
+
+
     nums = [int(k) for k in clustered_ids.keys()]
     original = [None]*len(nums)
     fobbiden_pairs = [(int(p[0]),int(p[1])) for p in pairs]
@@ -144,15 +201,7 @@ def motion_metrics(video, d, gt_class_idx, pred_logit):
     pred = func.get_avg_pred(model, video.permute(1,0,2,3), clustered_ids, combinations)
     logit_nomotion = pred[:,gt_class_idx]
 
-    p_imp = d['pair_analysis']['pair_importance']
-    p_ = [p[0] for p in p_imp]
-    p_imp_= [p[1] for p in p_imp]
-    if p_[0]==[None,None]:
-        p_ = p_[1:]
-        p_imp_ = p_imp_[1:]
 
-    sort_args = np.argsort(-1*np.array(p_imp_))
-    pairs_sort = np.array(p_)[sort_args].tolist()
 
     vals = list(clustered_ids.keys())
 
@@ -182,224 +231,30 @@ def motion_metrics(video, d, gt_class_idx, pred_logit):
                 max_solutions=20,
                 max_trials=5000
             )
-        
-def is_valid(arr, forbidden_pairs):
-    for i in range(len(arr) - 1):
-        if [arr[i], arr[i + 1]] in forbidden_pairs:
-            return False
-    return True
-
-def contains_sublist(lst, sublist):
-    n = len(sublist)
-    return any(sublist == lst[i:i+n] for i in range(len(lst) - n + 1))
-
-def sample_fill_array(numbers, existing, forbidden_pairs, seed=None, max_solutions=100, max_trials=10000):
-
-    for ex in existing:
-        assert ex not in forbidden_pairs, 'Error: pairs in the existing cannot be there in the forbidden_pairs'
-
-
-    flat = [item for sublist in existing for item in sublist]
-    assert len([n for n in numbers if n in flat])==0, 'any number in numbers must not be present in existing'
-
-    if seed is not None:
-        random.seed(seed)
-    
-    solutions = set()
-
-    #merge suitable items from the existing list
-    new_existing = existing.copy()
-    i=0
-    while i < len(new_existing):
-        p = new_existing[i]
-        rest = [item for item in new_existing if item!=p]
-        found=False
-        for r in rest:
-            assert not(r[0]==p[-1] and r[-1]==p[0]), 'invalid combinations'
-            if r[0]==p[-1]:
-                new_comb = list(dict.fromkeys(p + r))
-                rest_rest = [item for item in rest if item!=r]
-                new_existing = [new_comb]+rest_rest
-                found=True
-                break
-            if r[-1]==p[0]:
-                new_comb = list(dict.fromkeys(r + p))
-                rest_rest = [item for item in rest if item!=r]
-                new_existing = [new_comb]+rest_rest
-                found=True
-                break
-        if found:
-            continue
-        i+=1
-    
-    for _ in range(max_trials):
-        if len(solutions) >= max_solutions:
-            break
-        #calculate output length
-        e_ = [e_ for e in new_existing for e_ in e]
-        l_existing = len(e_)
-        assert len([e for e in e_ if e in numbers])==0, 'Error: there is an overlap between existing and the new numbers to fill.'
-        l_out = l_existing + len(numbers)
-
-
-        #fill existing numbers
-        #*******
-        array = [None]*l_out
-        filled = len([a for a in array if a != None])
-
-        while filled < l_existing:
-            array = [None]*l_out
-            for i_ex in range(len(new_existing)):
-                l = len(new_existing[i_ex])
-
-                #get available indices to fill
-                idx_none = [i for i,a in enumerate(array) if a == None]
-                idx_free = []
-                for idx in idx_none:
-                    avail = True
-                    for add in range(l):
-                        if (idx+add) not in idx_none:
-                            avail = False
-                            break
-                    if avail: idx_free.append(idx)
-                idx_sample = random.sample(idx_free,1)[0]
-                for idx_e_, e in enumerate(new_existing[i_ex]):
-                    array[idx_sample+idx_e_] = new_existing[i_ex][idx_e_]
-            filled = len([a for a in array if a != None])
-        assert filled == l_existing, 'Error, Cannot fill all the existing numbers!'
-        #*******
-        
-        #fill the rest of the array with the given numbers
-        avail_idx = [i for i,val in enumerate(array) if val is None]
-        random.shuffle(avail_idx)
-        for idx, ai in enumerate(avail_idx):
-            array[ai] = numbers[idx]
-        
-        #check if there are forbidden pairs in the solution
-
-        
-        if not is_valid(array, forbidden_pairs):
-            continue
-        
-        key = tuple(array)
-        if key in solutions:
-            continue
-        solutions.add(key)
-    
-    #check solution
-    for s in solutions:
-        assert is_valid(s, forbidden_pairs), 'Error: A solution with a fobidden pair found!'
-    for s in solutions:
-        for ex in existing:
-            assert contains_sublist(list(s), ex), f'Items in the existing list is not present in a solution {s}'
-    
-    return solutions
-
-import random
-def sample_fill_array_(
-    original,
-    numbers,
-    pairs_to_avoid,
-    max_solutions=10,
-    max_trials=10_000,
-    forbid_reverse=False,
-    seed=None,
-):
-    
-    orig_num = [n for n in original if n is not None]
-    assert len([n for n in orig_num if n in numbers])==0, "Error. Original array contains numbers that are in the given number set."
-    assert len(original) == len(orig_num)+len(numbers), "Error. The number of None entries in original_array must be equal to the number of given numbers + numer of non None elements in the origincal array"
-
-
-    if seed is not None:
-        random.seed(seed)
-
-    forbidden = set(pairs_to_avoid)
-    if forbid_reverse:
-        forbidden |= {(b, a) for (a, b) in pairs_to_avoid}
-
-    n = len(original)
-    fixed = original[:]
-    fixed_vals = {x for x in fixed if x is not None}
-    free_positions = [i for i, x in enumerate(fixed) if x is None]
-    available = [x for x in numbers if x not in fixed_vals]
-
-    #handle special cases seperately
-    skip_indices = [i for i, val in enumerate(original) if val is not None]
-    valid_indices = [i for i in range(n) if i not in skip_indices]
-    valid_indices.sort()
-    if len(original)==3 and len(fixed_vals)==2:
-        if valid_indices[0]==2:
-            if (original[1],numbers[0]) in pairs_to_avoid:
-                ret_array = [numbers[0],original[0],original[1]]
-            else:
-                ret_array = [original[0],original[1],numbers[0]]
-        if valid_indices[0]==0:
-            if (numbers[0],original[1]) in pairs_to_avoid:
-                ret_array = [original[1],original[2],numbers[0]]
-            else:
-                ret_array = [numbers[0],original[1],original[2]]
-        return [ret_array]
-
-
-    solutions = []
-    seen = set()
-
-    def is_valid(arr):
-        for i in range(n - 1):
-            if (arr[i], arr[i + 1]) in forbidden:
-                return False
-        return True
-
-    for _ in range(max_trials):
-        if len(solutions) >= max_solutions:
-            break
-
-        random.shuffle(available)
-        candidate = fixed[:]
-        for pos, val in zip(free_positions, available):
-            candidate[pos] = val
-
-        if not is_valid(candidate):
-            continue
-
-        key = tuple(candidate)
-        if key in seen:
-            continue
-
-        seen.add(key)
-        solutions.append(candidate)
-
-    return solutions
     
 
 if __name__ == '__main__':
-    forbidden_pairs = [[3,1],[4,5],[6,9]]
-    numbers = [1,3,4,5,6,7,8,9,11,13,14]
-    existing = [[0,2],[10,12],[2,10],[12,15]]
-    solutions = sample_fill_array(numbers, existing, forbidden_pairs)
-        
-    # with open(analysis_path, 'r', encoding='utf-8') as file:
-    #     data_dict = json.load(file)
+    with open(analysis_path, 'r', encoding='utf-8') as file:
+        data_dict = json.load(file)
     
-    # for i, k in enumerate(data_dict):
-    #     print(f'Processing sample {i+1}/{len(data_dict)}: {k}', end='\r')
-    #     d = data_dict[k]
-    #     gt_class = d['motion_importance']['gt_class']
-    #     print(f'Class: {gt_class}')
-    #     gt_class_idx = class_labels[gt_class.lower()]
-    #     pred_logit = d['motion_importance']['pred_original_logit']
-    #     pred_class = d['motion_importance']['pred_original_class']
+    for i, k in enumerate(data_dict):
+        print(f'Processing sample {i+1}/{len(data_dict)}: {k}', end='\r')
+        d = data_dict[k]
+        gt_class = d['motion_importance']['gt_class']
+        print(f'Class: {gt_class}')
+        gt_class_idx = class_labels[gt_class.lower()]
+        pred_logit = d['motion_importance']['pred_original_logit']
+        pred_class = d['motion_importance']['pred_original_class']
 
-    #     #we consider only correctly lassified sampless
-    #     if gt_class.lower() != pred_class.lower():
-    #         continue
-    #     sfs = d['single_frame_structure']
+        #we consider only correctly lassified sampless
+        if gt_class.lower() != pred_class.lower():
+            continue
+        sfs = d['single_frame_structure']
 
-    #     g = k.split('_')[2][1:]
-    #     c = k.split('_')[3][1:]
-    #     cls_name = d['motion_importance']['gt_class']
-    #     vid_path = ucf101dm.construct_vid_path(cls_name,g,c)
-    #     video = ucf101dm.load_jpg_ucf101(vid_path,n=0).to(device)
-    #     sm = structure_metrics(video, d, gt_class_idx, pred_logit)
-    #     mm = motion_metrics(video, d, gt_class_idx, pred_logit)
+        g = k.split('_')[2][1:]
+        c = k.split('_')[3][1:]
+        cls_name = d['motion_importance']['gt_class']
+        vid_path = ucf101dm.construct_vid_path(cls_name,g,c)
+        video = ucf101dm.load_jpg_ucf101(vid_path,n=0).to(device)
+        sm = structure_metrics(video, d, gt_class_idx, pred_logit)
+        mm = motion_metrics(video, d, gt_class_idx, pred_logit)
