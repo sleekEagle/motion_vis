@@ -190,16 +190,6 @@ def motion_metrics(model, video, d, gt_class_idx, pred_logit):
     return metrics
 
 
-def spacial_analysis_dFdI(model, video, pairs, cluster_dict, gt_class_idx):
-    ordered_keys = cluster_dict['order']
-    clustered_ids = cluster_dict['clusters']
-    clus_video = func.create_new_video(video.permute(1,0,2,3).clone(), clustered_ids, ordered_keys)
-
-    gmodel = func.GradcamModel(model)
-    flow_sal = gmodel.calc_flow_saliency(clus_video.to('cuda'), cluster_dict, pairs, gt_class_idx, grad_method='sal')
-
-    return flow_sal
-
 
 '''
 ***********************************************************************************************

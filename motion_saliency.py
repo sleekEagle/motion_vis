@@ -293,25 +293,6 @@ def spacial_analysis_objmask(video, pairs, masks, clustered_ids, gt_class, pred_
 
     return pair_imp
 
-
-def spacial_analysis_dFdI(video, pairs, cluster_dict, gt_class_idx):
-    ordered_keys = cluster_dict['order']
-    clustered_ids = cluster_dict['clusters']
-    clus_video = func.create_new_video(video.permute(1,0,2,3).clone(), clustered_ids, ordered_keys)
-
-    gmodel = func.GradcamModel(model)
-    flow_sal = gmodel.calc_flow_saliency(clus_video.to('cuda'), cluster_dict, pairs, gt_class_idx, grad_method='sal')
-    dPred_dF = flow_sal[0]['dPred_dF']
-    dPred_dF_f = flow_sal[0]['dPred_dF*flow']
-    img = flow_sal[0]['img']
-
-    func.overlay_mask(img.permute(1,2,0).to('cpu'), dPred_dF_f.to('cpu'))
-
-    pass
-
-
-
-
 def go_through_samples():
     mask_out_path = r'C:\Users\lahir\Downloads\UCF101\analysis\masks'
     path = r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance.json'
@@ -463,9 +444,124 @@ def go_through_samples():
             #     # out_path = os.path.join(sub_dir, f'gmask_{p[0]}_{p[1]}.jpg')
             #     # cv2.imwrite(out_path, gm)
 
+from PIL import Image
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+def spacial_analysis_dFdI(model, video, pairs, cluster_dict, gt_class_idx):
+    ordered_keys = cluster_dict['order']
+    clustered_ids = cluster_dict['clusters']
+    clus_video = func.create_new_video(video.permute(1,0,2,3).clone(), clustered_ids, ordered_keys)
+
+    gmodel = func.GradcamModel(model)
+    flow_sal = gmodel.calc_flow_saliency(clus_video.to('cuda'), cluster_dict, pairs, gt_class_idx, grad_method='sal')
+
+    return flow_sal
+
+def save_rgb(img, path):
+    img = np.transpose(img, (1,2,0))
+    img = (img-img.min())/(img.max()-img.min()+1e-5)
+    img = (img * 255).astype(np.uint8)
+    img = Image.fromarray(img, mode='RGB')
+    img.save(path)
+
+def save_grey(img, path):
+    img = (img-img.min())/(img.max()-img.min()+1e-5)
+    img = (img * 255).astype(np.uint8)
+    img = Image.fromarray(img)
+    img.save(path)
+
+def get_overlay_img(img, hm, show=False):
+    import matplotlib.cm as cm
+
+    img = (img-img.min())/(img.max()-img.min())
+    img = np.transpose(img, (1,2,0))
+    
+    hm = (hm-hm.min())/(hm.max()-hm.min()+1e-5)
+    colored_heatmap = cm.jet(hm)[:, :, :3]
+    alpha = 0.5 
+    overlay = (1 - alpha) * img + alpha * colored_heatmap
+    overlay = np.clip(overlay, 0, 1)
+
+    if show:
+        plt.imshow(overlay)
+        plt.axis('off')
+        plt.show(block=True)
+
+    return overlay
+
+
+def spacial_analysis_UCF101():
+    analysis_path = r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_motion_importance.json'
+    output_path = r'C:\Users\lahir\Downloads\UCF101\analysis\ucf101_spacial'
+
+    #create model and data loader
+    ucf101dm = func.UCF101_data_model()
+    model = ucf101dm.model
+    model.to('cuda')
+    model.eval()
+    inference_loader = ucf101dm.inference_loader
+    class_names = ucf101dm.inference_class_names
+    class_labels = {}
+    for k in class_names.keys():
+        cls_name = class_names[k]
+        class_labels[cls_name.lower()] = k
+
+    with open(analysis_path, 'r', encoding='utf-8') as file:
+        data_dict = json.load(file)
+    
+    for i, k in enumerate(data_dict):
+        print(f'Processing sample {i+1}/{len(data_dict)}: {k}', end='\r')
+
+        d = data_dict[k]
+        if d['single_frame_structure']:
+            continue
+
+        gt_class = d['motion_importance']['gt_class']
+        print(f'Class: {gt_class}')
+        gt_class_idx = class_labels[gt_class.lower()]
+        pred_logit = d['motion_importance']['pred_original_logit']
+        pred_class = d['motion_importance']['pred_original_class']
+        
+        #we consider only correctly lassified sampless
+        if gt_class.lower() != pred_class.lower():
+            continue
+
+        pair_importance = d['pair_analysis']['pair_importance']
+        pairs = [pi[0] for pi in pair_importance if pi[0]!=[]]
+        clustered_ids = d['pair_analysis']['clustered_ids']
+        ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
+        frame_ids = func.get_cluster_frameids(clustered_ids, ordered_keys)
+        d_ = {}
+        d_['clusters'] = clustered_ids
+        d_['order'] = ordered_keys
+        d_['frame_ids'] = frame_ids
+        cluster_dict = d_
+
+        g = k.split('_')[2][1:]
+        c = k.split('_')[3][1:]
+        cls_name = d['motion_importance']['gt_class']
+        vid_path = ucf101dm.construct_vid_path(cls_name,g,c)
+        video = ucf101dm.load_jpg_ucf101(vid_path,n=0).to(device)
+
+        analysis = spacial_analysis_dFdI(model, video, pairs, cluster_dict, gt_class_idx)
+        keys = analysis.keys()
+
+        #save imgs
+        out_dir =  os.path.join(output_path, gt_class, k) 
+        os.makedirs(out_dir, exist_ok=True)
+        for key in keys:
+            str_p = ','.join([str(p) for p in analysis[key]['pair']])
+            save_rgb(analysis[key]['img'], os.path.join(out_dir, f'img_{str_p}.png'))
+            save_grey(analysis[key]['dPred_dF'], os.path.join(out_dir, f'dPred_dF_{str_p}.png'))
+            save_grey(analysis[key]['dPred_dF*flow'], os.path.join(out_dir, f'dPred_dF_f_{str_p}.png'))
+            #create overlay            
+            img = analysis[key]['img']
+            hm = analysis[key]['dPred_dF*flow']
+            overlay = get_overlay_img(img, hm)
+            save_rgb(np.transpose(overlay, (2,0,1)), os.path.join(out_dir, f'overlay_{str_p}.png'))
             
 if __name__ == '__main__':
-    go_through_samples()
+    spacial_analysis_UCF101()
 
 
 
