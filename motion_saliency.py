@@ -517,7 +517,6 @@ def spacial_analysis_UCF101():
             continue
 
         gt_class = d['motion_importance']['gt_class']
-        print(f'Class: {gt_class}')
         gt_class_idx = class_labels[gt_class.lower()]
         pred_logit = d['motion_importance']['pred_original_logit']
         pred_class = d['motion_importance']['pred_original_class']
