@@ -268,8 +268,11 @@ def calc_spacial_metrics_UCF101():
     
     for i, k in enumerate(data_dict):
         print(f'Processing sample {i+1}/{len(data_dict)}: {k}', end='\r')
-        
+
         d = data_dict[k]
+        if d['single_frame_structure']:
+            continue
+        
         gt_class = d['motion_importance']['gt_class']
         print(f'Class: {gt_class}')
         gt_class_idx = class_labels[gt_class.lower()]

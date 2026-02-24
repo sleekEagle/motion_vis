@@ -41,6 +41,7 @@ def motion_importance(model, video, class_names):
 
     ret = {
         'pred_original_class': class_names[pred_cls],
+        'pred_original_idx': pred_cls,
         'pred_original_logit': logit_original,
         'all_logits': logits,
         'max_frame_logit': max_logit,
@@ -80,6 +81,10 @@ def calc_video_motion_importance(model, video, gt_class_name, gt_idx, class_name
     ret = motion_importance(model, video.unsqueeze(0), class_names)
     pred_logit = ret['pred_original_logit']
     pred_class = ret['pred_original_class']
+    pred_class_idx = ret['pred_original_idx']
+
+    if pred_class_idx != gt_idx: # we conly consider correctly classified samples
+        return -1
 
     all_logits = ret['all_logits']
     lowest_perc_change = ret['lowest_perc_change']
@@ -105,6 +110,7 @@ def calc_video_motion_importance(model, video, gt_class_name, gt_idx, class_name
             #update the video with only the valuable frames
             video_ = func.create_new_video(video, clustered_ids, ordered_keys)
             ret = func.get_pred_stats(model, video_, gt_idx, pred_logit)
+
             used_values.append(new_idx)
             percent_change_ = (pred_logit - ret['logit'])/pred_logit
 
@@ -224,14 +230,16 @@ def motion_importance_UCF101():
         print(f'{idx/len(inference_loader)*100:.0f} % is done.', end='\r')
         inputs, targets = batch
         video = inputs[0].to('cuda')
+
         gt_class_name = targets[0][0].split('_')[1]
         gt_idx = class_labels[gt_class_name.lower()]
         file_name = targets[0][0]
 
-        file_analysis = calc_video_motion_importance(model, video, gt_class_name, gt_idx, class_names)
+        # func.get_pred_stats(model, video, gt_idx, 0.820443332195282)
 
-        # if file_name!='v_Swing_g07_c02':
-        #     continue
+        file_analysis = calc_video_motion_importance(model, video, gt_class_name, gt_idx, class_names)
+        if file_analysis == -1:
+            continue
 
         seq = targets[0][1]
         seq = ','.join([str(s) for s in seq])
@@ -302,7 +310,7 @@ def print_clus_ids(c):
 
 
 if __name__ == '__main__':
-    motion_importance_ssv2()
+    motion_importance_UCF101()
 
 
 
