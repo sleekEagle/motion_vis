@@ -74,7 +74,7 @@ def get_uniqueval_indices(ids):
 
 
 change_threshold = 0.02
-def calc_video_motion_importance(model, video, gt_class_name, gt_idx, class_names):
+def calc_video_motion_importance(model, video, gt_class_name, gt_idx, class_names, max_solutions=100):
     file_analysis = {}
 
     ret = motion_importance(model, video.unsqueeze(0), class_names)
@@ -181,7 +181,7 @@ def calc_video_motion_importance(model, video, gt_class_name, gt_idx, class_name
                         forbidden = [p for p in pairs[1:] if p != pair]
                         numbers = [f for f in frames if f not in existing]
                         existing = [list(e) for e in [existing]]
-                        solutions = func.sample_fill_array(numbers, existing, forbidden, max_solutions=100)
+                        solutions = func.sample_fill_array(numbers, existing, forbidden, max_solutions=max_solutions)
                         avg_pred = func.get_avg_pred(model, video, clustered_ids, solutions)
                         avg_logit = avg_pred[:,gt_idx].item()
                         pair_avg_logit.append((pair, avg_logit))
@@ -256,12 +256,35 @@ def motion_importance_UCF101():
 
 def motion_importance_ssv2():
     from models.ssv2 import VJEPA2
+    from dataloaders import ssv2
 
     model = VJEPA2()
     model.model.eval()
-
     class_names = list(model.label2id.keys())
-    pass
+    output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\ssv2_motion_importance.json')
+
+    d_names, paths = ssv2.get_ssv2_paths()
+    n_samples, n_correct = 0, 0
+    anlysis_data = {}
+    for d,p in zip(d_names, paths):
+        print(f'{n_samples/len(d_names)*100:.0f} % is done. ({n_samples} of {len(d_names)})', end='\r')
+
+        gt_idx = model.label2id[d]
+        v = model.video_from_path(p)['pixel_values'][0,:].permute(1,0,2,3)
+        file_analysis = calc_video_motion_importance(model, v, d, gt_idx, class_names, max_solutions=10)
+        anlysis_data[d] = file_analysis
+        
+        pred_class = file_analysis['motion_importance']['pred_original_class']
+        if pred_class.lower() == d.lower():
+            n_correct += 1
+        n_samples += 1
+    
+    accuracy = n_correct / n_samples
+    print(f'Overall accuracy: {accuracy:.3f}')
+    anlysis_data['accuracy'] = accuracy
+    anlysis_data['threshold'] = change_threshold
+    with open(output_path, "w") as f:
+        json.dump(anlysis_data, f)
 
 #**************************************************************************************
 

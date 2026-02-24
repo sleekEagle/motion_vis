@@ -9,7 +9,7 @@ Accuracy = 69.18 %
 '''
 def test_s2s():
     model = VJEPA2()
-    model.model.eval()
+    model.eval()
 
     cls_names = list(model.label2id.keys())
 
