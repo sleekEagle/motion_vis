@@ -271,7 +271,7 @@ def motion_importance_ssv2():
 
         gt_idx = model.label2id[d]
         v = model.video_from_path(p)['pixel_values'][0,:].permute(1,0,2,3)
-        file_analysis = calc_video_motion_importance(model, v, d, gt_idx, class_names, max_solutions=10)
+        file_analysis = calc_video_motion_importance(model, v, d, gt_idx, class_names, max_solutions=2)
         anlysis_data[d] = file_analysis
         
         pred_class = file_analysis['motion_importance']['pred_original_class']
