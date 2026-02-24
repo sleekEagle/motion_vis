@@ -272,12 +272,22 @@ def calc_spacial_metrics_UCF101():
         d = data_dict[k]
         if d['single_frame_structure']:
             continue
-        
+
+        # if 'motion_importance' not in d:
+        #     continue
+        # if 'pair_analysis' not in d:
+        #     continue
+
         gt_class = d['motion_importance']['gt_class']
         print(f'Class: {gt_class}')
         gt_class_idx = class_labels[gt_class.lower()]
         pred_logit = d['motion_importance']['pred_original_logit']
         pred_class = d['motion_importance']['pred_original_class']
+        
+        #we consider only correctly lassified sampless
+        if gt_class.lower() != pred_class.lower():
+            continue
+
         pair_importance = d['pair_analysis']['pair_importance']
         pairs = [pi[0] for pi in pair_importance if pi[0]!=[]]
         clustered_ids = d['pair_analysis']['clustered_ids']
@@ -289,9 +299,7 @@ def calc_spacial_metrics_UCF101():
         d_['frame_ids'] = frame_ids
         cluster_dict = d_
 
-        #we consider only correctly lassified sampless
-        if gt_class.lower() != pred_class.lower():
-            continue
+
 
         g = k.split('_')[2][1:]
         c = k.split('_')[3][1:]
@@ -310,8 +318,12 @@ def calc_spacial_metrics_UCF101():
             save_rgb(analysis[key]['img'], os.path.join(out_dir, f'img_{str_p}.png'))
             save_grey(analysis[key]['dPred_dF'], os.path.join(out_dir, f'dPred_dF_{str_p}.png'))
             save_grey(analysis[key]['dPred_dF*flow'], os.path.join(out_dir, f'dPred_dF_f{str_p}.png'))
+            #create overlay
+            func.overlay_mask(np.transpose(analysis[key]['img'], (1,2,0)), analysis[key]['dPred_dF*flow'])
+            pass
 
 '''
+
 ***********************************************************************************************
 ***********************************************************************************************
 '''

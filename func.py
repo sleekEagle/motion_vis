@@ -1123,7 +1123,7 @@ class GradcamModel(nn.Module):
                 'dPred_dF*flow': (dPred_dF*f_mag).cpu().numpy(),
                 'flow': f.cpu().numpy(),
                 'flow_mag': f_mag.cpu().numpy(),
-                'img': img1[0,:].cpu().numpy()
+                'img': img0[0,:].cpu().numpy()
             }
 
             ret[idx] = d
