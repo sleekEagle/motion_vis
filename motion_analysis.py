@@ -8,26 +8,14 @@ import numpy as np
 import torch.nn.functional as F
 from torchvision.models.feature_extraction import create_feature_extractor
 import func
-
-#create model and data loader
-ucf101dm = func.UCF101_data_model()
-model = ucf101dm.model
-model.to('cuda')
-model.eval()
-inference_loader = ucf101dm.inference_loader
-class_names = ucf101dm.inference_class_names
-
-class_labels = {}
-for k in class_names.keys():
-    cls_name = class_names[k]
-    class_labels[cls_name.lower()] = k
+import json
 
 '''
 replace the whole video with just one frame repeated
 and see how the prediction changes
 '''
 #**************************************************************************************
-def motion_importance(video):
+def motion_importance(model, video, class_names):
     # video = ucf101dm.load_jpg_ucf101(vid_path)
     # video = video.unsqueeze(0).permute(0,2,1,3,4)
     pred = model(video)
@@ -63,9 +51,6 @@ def motion_importance(video):
     return ret
 
 MAX_VID = 10
-import random
-import json
-
 
 def replace_cluster(clustered_ids, source_key, dest_key):
     ids = clustered_ids.copy()
@@ -79,86 +64,6 @@ def replace_cluster(clustered_ids, source_key, dest_key):
     ids = dict(sorted(ids.items(), key=lambda x:x[1][0]))
     return ids
 
-'''
-Monte-Carlo method to fill the array and avoid the forbidden pairs
-'''
-def sample_fill_array(
-    original,
-    numbers,
-    pairs_to_avoid,
-    max_solutions=10,
-    max_trials=10_000,
-    forbid_reverse=False,
-    seed=None,
-):
-    
-    orig_num = [n for n in original if n is not None]
-    assert len([n for n in orig_num if n in numbers])==0, "Error. Original array contains numbers that are in the given number set."
-    assert len(original) == len(orig_num)+len(numbers), "Error. The number of None entries in original_array must be equal to the number of given numbers + numer of non None elements in the origincal array"
-
-
-    if seed is not None:
-        random.seed(seed)
-
-    forbidden = set(pairs_to_avoid)
-    if forbid_reverse:
-        forbidden |= {(b, a) for (a, b) in pairs_to_avoid}
-
-    n = len(original)
-    fixed = original[:]
-    fixed_vals = {x for x in fixed if x is not None}
-    free_positions = [i for i, x in enumerate(fixed) if x is None]
-    available = [x for x in numbers if x not in fixed_vals]
-
-    #handle special cases seperately
-    skip_indices = [i for i, val in enumerate(original) if val is not None]
-    valid_indices = [i for i in range(n) if i not in skip_indices]
-    valid_indices.sort()
-    if len(original)==3 and len(fixed_vals)==2:
-        if valid_indices[0]==2:
-            if (original[1],numbers[0]) in pairs_to_avoid:
-                ret_array = [numbers[0],original[0],original[1]]
-            else:
-                ret_array = [original[0],original[1],numbers[0]]
-        if valid_indices[0]==0:
-            if (numbers[0],original[1]) in pairs_to_avoid:
-                ret_array = [original[1],original[2],numbers[0]]
-            else:
-                ret_array = [numbers[0],original[1],original[2]]
-        return [ret_array]
-
-
-    solutions = []
-    seen = set()
-
-    def is_valid(arr):
-        for i in range(n - 1):
-            if (arr[i], arr[i + 1]) in forbidden:
-                return False
-        return True
-
-    for _ in range(max_trials):
-        if len(solutions) >= max_solutions:
-            break
-
-        random.shuffle(available)
-        candidate = fixed[:]
-
-        for pos, val in zip(free_positions, available):
-            candidate[pos] = val
-
-        if not is_valid(candidate):
-            continue
-
-        key = tuple(candidate)
-        if key in seen:
-            continue
-
-        seen.add(key)
-        solutions.append(candidate)
-
-    return solutions
-
 def get_uniqueval_indices(ids):
     unique_ids = np.unique(list(ids.keys()))
     args = [np.argwhere(ids==id) for id in unique_ids]
@@ -169,10 +74,10 @@ def get_uniqueval_indices(ids):
 
 
 change_threshold = 0.02
-def calc_video_motion_importance(model, video, gt_class_name, gt_idx):
+def calc_video_motion_importance(model, video, gt_class_name, gt_idx, class_names):
     file_analysis = {}
 
-    ret = motion_importance(video.unsqueeze(0))
+    ret = motion_importance(model, video.unsqueeze(0), class_names)
     pred_logit = ret['pred_original_logit']
     pred_class = ret['pred_original_class']
 
@@ -298,6 +203,19 @@ def calc_video_motion_importance(model, video, gt_class_name, gt_idx):
 UCF101 accuracy = 0.854
 '''
 def motion_importance_UCF101():
+    #create model and data loader
+    ucf101dm = func.UCF101_data_model()
+    model = ucf101dm.model
+    model.to('cuda')
+    model.eval()
+    inference_loader = ucf101dm.inference_loader
+    class_names = ucf101dm.inference_class_names
+
+    class_labels = {}
+    for k in class_names.keys():
+        cls_name = class_names[k]
+        class_labels[cls_name.lower()] = k
+
     output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_motion_importance.json')
     
     anlysis_data = {}
@@ -310,7 +228,7 @@ def motion_importance_UCF101():
         gt_idx = class_labels[gt_class_name.lower()]
         file_name = targets[0][0]
 
-        file_analysis = calc_video_motion_importance(model, video, gt_class_name, gt_idx)
+        file_analysis = calc_video_motion_importance(model, video, gt_class_name, gt_idx, class_names)
 
         # if file_name!='v_Swing_g07_c02':
         #     continue
@@ -335,6 +253,16 @@ def motion_importance_UCF101():
     with open(output_path, "w") as f:
         json.dump(anlysis_data, f)
 
+
+def motion_importance_ssv2():
+    from models.ssv2 import VJEPA2
+
+    model = VJEPA2()
+    model.model.eval()
+
+    class_names = list(model.label2id.keys())
+    pass
+
 #**************************************************************************************
 
 def replace_frames(video, source_key, dest_key, frame_cluster_idxs):
@@ -344,34 +272,6 @@ def replace_frames(video, source_key, dest_key, frame_cluster_idxs):
     new_video[:,dest_idxs,:] = source_frame.unsqueeze(1).repeat(1,len(dest_idxs),1,1)
     return new_video
 
-import json
-def analyze_motion_imporance():
-    path = r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance.json'
-    with open(path, 'r', encoding='utf-8') as file:
-        data = json.load(file)
-
-    for idx, batch in enumerate(inference_loader):
-        print(f'{idx/len(inference_loader)*100:.0f} % is done.', end='\r')
-
-        inputs, targets = batch
-        video = inputs[0].to('cuda')
-        gt_file_name = targets[0][0]
-        if gt_file_name in data: # if this sample is in the data. i.e if the prediction for this class is correct
-            d = data[gt_file_name]
-
-            #is there just one frame that can explain the whole video ?
-            sfs = d['single_frame_structure']
-            if sfs:
-                continue
-            else: # no
-                pair_imp = d['pair_analysis']['pair_importance']
-                if len(pair_imp)==1 and pair_imp[0][0]==[None,None]: #motion does not matter at all for the prediction
-                    pass
-                else:
-                    print('motion is important for this video!!')
-                    pair_imp[4]
-
-
             
 def print_clus_ids(c):
     for k in c.keys():
@@ -379,7 +279,7 @@ def print_clus_ids(c):
 
 
 if __name__ == '__main__':
-    motion_importance_UCF101()
+    motion_importance_ssv2()
 
 
 
