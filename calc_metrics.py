@@ -8,8 +8,22 @@ import cv2
 import os
 import sam_ui
 import random
+from PIL import Image
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
+
+def save_rgb(img, path):
+    img = np.transpose(img, (1,2,0))
+    img = (img-img.min())/(img.max()-img.min()+1e-5)
+    img = (img * 255).astype(np.uint8)
+    img = Image.fromarray(img, mode='RGB')
+    img.save(path)
+
+def save_grey(img, path):
+    img = (img-img.min())/(img.max()-img.min()+1e-5)
+    img = (img * 255).astype(np.uint8)
+    img = Image.fromarray(img)
+    img.save(path)
 
 
 def structure_metrics(model, video, d, gt_class_idx, pred_logit):
@@ -183,16 +197,8 @@ def spacial_analysis_dFdI(model, video, pairs, cluster_dict, gt_class_idx):
 
     gmodel = func.GradcamModel(model)
     flow_sal = gmodel.calc_flow_saliency(clus_video.to('cuda'), cluster_dict, pairs, gt_class_idx, grad_method='sal')
-    dPred_dF = flow_sal[0]['dPred_dF']
-    dPred_dF_f = flow_sal[0]['dPred_dF*flow']
-    img = flow_sal[0]['img']
 
-    i = (dPred_dF-dPred_dF.min())/(dPred_dF.max()-dPred_dF.min())*255
-    i = i.int()
-
-    func.show_gray_image(i.cpu().numpy())
-
-    func.overlay_mask(img.permute(1,2,0).to('cpu'), dPred_dF_f.to('cpu'))
+    return flow_sal
 
 
 '''
@@ -243,6 +249,7 @@ def calc_temporal_metrics_UCF101():
 
 def calc_spacial_metrics_UCF101():
     analysis_path = r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_motion_importance.json'
+    output_path = r'C:\Users\lahir\Downloads\UCF101\analysis\ucf101_spacial'
 
     #create model and data loader
     ucf101dm = func.UCF101_data_model()
@@ -261,6 +268,7 @@ def calc_spacial_metrics_UCF101():
     
     for i, k in enumerate(data_dict):
         print(f'Processing sample {i+1}/{len(data_dict)}: {k}', end='\r')
+        
         d = data_dict[k]
         gt_class = d['motion_importance']['gt_class']
         print(f'Class: {gt_class}')
@@ -288,10 +296,17 @@ def calc_spacial_metrics_UCF101():
         vid_path = ucf101dm.construct_vid_path(cls_name,g,c)
         video = ucf101dm.load_jpg_ucf101(vid_path,n=0).to(device)
 
-        spacial_analysis_dFdI(model, video, pairs, cluster_dict, gt_class_idx)
+        analysis = spacial_analysis_dFdI(model, video, pairs, cluster_dict, gt_class_idx)
+        keys = analysis.keys()
 
-        pass
-
+        #save imgs
+        out_dir =  os.path.join(output_path, gt_class, k) 
+        os.makedirs(out_dir, exist_ok=True)
+        for key in keys:
+            str_p = ','.join([str(p) for p in analysis[key]['pair']])
+            save_rgb(analysis[key]['img'], os.path.join(out_dir, f'img_{str_p}.png'))
+            save_grey(analysis[key]['dPred_dF'], os.path.join(out_dir, f'dPred_dF_{str_p}.png'))
+            save_grey(analysis[key]['dPred_dF*flow'], os.path.join(out_dir, f'dPred_dF_f{str_p}.png'))
 
 '''
 ***********************************************************************************************
