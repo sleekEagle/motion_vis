@@ -19,14 +19,14 @@ def show_img(img):
     plt.show()
 
 #input img shape: [H, W], np array
-def show_gray_image(gray):
+def show_gray_image(gray,block=False):
     import matplotlib.pyplot as plt
     gray =  (gray - gray.min())/(gray.max() - gray.min() + 1e-5)
     gray = gray * 255.0
     gray = gray.astype(np.uint8)
     plt.imshow(gray, cmap='gray')
     plt.axis("off")
-    plt.show(block=True)
+    plt.show(block=block)
 
 #input img shape: [H, W, 3], np array
 def show_rgb_image(img):

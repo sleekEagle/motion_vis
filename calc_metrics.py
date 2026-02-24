@@ -11,22 +11,8 @@ import random
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-analysis_path = r'C:\Users\lahir\Downloads\UCF101\analysis\motion_importance.json'
 
-#create model and data loader
-ucf101dm = func.UCF101_data_model()
-model = ucf101dm.model
-model.to('cuda')
-model.eval()
-inference_loader = ucf101dm.inference_loader
-class_names = ucf101dm.inference_class_names
-class_labels = {}
-for k in class_names.keys():
-    cls_name = class_names[k]
-    class_labels[cls_name.lower()] = k
-
-
-def structure_metrics(video, d, gt_class_idx, pred_logit):
+def structure_metrics(model, video, d, gt_class_idx, pred_logit):
     metrics = {}
     if sfs:
         mimp = d['motion_importance']
@@ -119,7 +105,7 @@ def structure_metrics(video, d, gt_class_idx, pred_logit):
     
     return metrics
 
-def motion_metrics(video, d, gt_class_idx, pred_logit):
+def motion_metrics(model, video, d, gt_class_idx, pred_logit):
     metrics = {}
 
     clustered_ids = d['pair_analysis']['clustered_ids']
@@ -188,9 +174,47 @@ def motion_metrics(video, d, gt_class_idx, pred_logit):
     metrics['AUC_delete'] = AUC_delete
         
     return metrics
-    
 
-if __name__ == '__main__':
+
+def spacial_analysis_dFdI(model, video, pairs, cluster_dict, gt_class_idx):
+    ordered_keys = cluster_dict['order']
+    clustered_ids = cluster_dict['clusters']
+    clus_video = func.create_new_video(video.permute(1,0,2,3).clone(), clustered_ids, ordered_keys)
+
+    gmodel = func.GradcamModel(model)
+    flow_sal = gmodel.calc_flow_saliency(clus_video.to('cuda'), cluster_dict, pairs, gt_class_idx, grad_method='sal')
+    dPred_dF = flow_sal[0]['dPred_dF']
+    dPred_dF_f = flow_sal[0]['dPred_dF*flow']
+    img = flow_sal[0]['img']
+
+    i = (dPred_dF-dPred_dF.min())/(dPred_dF.max()-dPred_dF.min())*255
+    i = i.int()
+
+    func.show_gray_image(i.cpu().numpy())
+
+    func.overlay_mask(img.permute(1,2,0).to('cpu'), dPred_dF_f.to('cpu'))
+
+
+'''
+***********************************************************************************************
+calc metrics for UCF101 dataset
+***********************************************************************************************
+'''
+def calc_temporal_metrics_UCF101():
+    analysis_path = r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_motion_importance.json'
+
+    #create model and data loader
+    ucf101dm = func.UCF101_data_model()
+    model = ucf101dm.model
+    model.to('cuda')
+    model.eval()
+    inference_loader = ucf101dm.inference_loader
+    class_names = ucf101dm.inference_class_names
+    class_labels = {}
+    for k in class_names.keys():
+        cls_name = class_names[k]
+        class_labels[cls_name.lower()] = k
+
     with open(analysis_path, 'r', encoding='utf-8') as file:
         data_dict = json.load(file)
     
@@ -213,5 +237,69 @@ if __name__ == '__main__':
         cls_name = d['motion_importance']['gt_class']
         vid_path = ucf101dm.construct_vid_path(cls_name,g,c)
         video = ucf101dm.load_jpg_ucf101(vid_path,n=0).to(device)
-        sm = structure_metrics(video, d, gt_class_idx, pred_logit)
-        mm = motion_metrics(video, d, gt_class_idx, pred_logit)
+        sm = structure_metrics(model, video, d, gt_class_idx, pred_logit)
+        mm = motion_metrics(model, video, d, gt_class_idx, pred_logit)
+
+
+def calc_spacial_metrics_UCF101():
+    analysis_path = r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_motion_importance.json'
+
+    #create model and data loader
+    ucf101dm = func.UCF101_data_model()
+    model = ucf101dm.model
+    model.to('cuda')
+    model.eval()
+    inference_loader = ucf101dm.inference_loader
+    class_names = ucf101dm.inference_class_names
+    class_labels = {}
+    for k in class_names.keys():
+        cls_name = class_names[k]
+        class_labels[cls_name.lower()] = k
+
+    with open(analysis_path, 'r', encoding='utf-8') as file:
+        data_dict = json.load(file)
+    
+    for i, k in enumerate(data_dict):
+        print(f'Processing sample {i+1}/{len(data_dict)}: {k}', end='\r')
+        d = data_dict[k]
+        gt_class = d['motion_importance']['gt_class']
+        print(f'Class: {gt_class}')
+        gt_class_idx = class_labels[gt_class.lower()]
+        pred_logit = d['motion_importance']['pred_original_logit']
+        pred_class = d['motion_importance']['pred_original_class']
+        pair_importance = d['pair_analysis']['pair_importance']
+        pairs = [pi[0] for pi in pair_importance if pi[0]!=[]]
+        clustered_ids = d['pair_analysis']['clustered_ids']
+        ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
+        frame_ids = func.get_cluster_frameids(clustered_ids, ordered_keys)
+        d_ = {}
+        d_['clusters'] = clustered_ids
+        d_['order'] = ordered_keys
+        d_['frame_ids'] = frame_ids
+        cluster_dict = d_
+
+        #we consider only correctly lassified sampless
+        if gt_class.lower() != pred_class.lower():
+            continue
+
+        g = k.split('_')[2][1:]
+        c = k.split('_')[3][1:]
+        cls_name = d['motion_importance']['gt_class']
+        vid_path = ucf101dm.construct_vid_path(cls_name,g,c)
+        video = ucf101dm.load_jpg_ucf101(vid_path,n=0).to(device)
+
+        spacial_analysis_dFdI(model, video, pairs, cluster_dict, gt_class_idx)
+
+        pass
+
+
+'''
+***********************************************************************************************
+***********************************************************************************************
+'''
+
+    
+
+if __name__ == '__main__':
+    calc_spacial_metrics_UCF101()
+
