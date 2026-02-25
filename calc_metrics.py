@@ -308,7 +308,7 @@ def calc_spacial_metrics_UCF101():
             img0_batch = torch.concatenate([img0_batch,video[f0,:][None,:]])
             img1_batch = torch.concatenate([img1_batch,video[f1,:][None,:]])
         
-        flows = raftof.predict_flow_batch(img0_batch, img1_batch)
+        flows = raftof.predict_flow_batch(img1_batch, img0_batch)
 
         v_clus = func.create_new_video(video.permute(1,0,2,3), clustered_ids_ord)
         for p_idx, p in enumerate(pairs):
@@ -351,11 +351,24 @@ def calc_spacial_metrics_UCF101():
 
             f_w = func.get_windows(f[None,:], WINDOW)
             #remove motion in the important hm areas one by one: deletion test
+            logits = []
             for idx in range(0, len(hm_sort_args)-1):
                 f_w_ = f_w.clone()
                 f_w_[:,:,:,:,hm_x[0:idx+1],hm_y[0:idx+1]] = 0
+                f_w_re = func.fold_windows(f_w_, WINDOW, H)[:,0,:]
+                i1_mod = func.warp_batch(i0[None,:], f_w_re)
+                ordered_keys = [int(k) for k in ordered_keys]
+                i1_mod = F.interpolate(i1_mod, size=(v_clus.size(2),v_clus.size(3)), mode='bilinear', align_corners=False)[0,:]
+                v_ = func.replace_frame(v_clus, ordered_keys, clustered_ids_ord, p[1], i1_mod)
+                stats = func.get_pred_stats(model, v_, gt_class_idx, pred_logit)
+                l = stats['logit']
+                logits.append(l)
+            x = np.linspace(0, 1, len(logits))
+            AUC_delete = float(np.trapezoid(logits, x))
 
-                # f_w_re = func.fold_windows(f_w_, WINDOW, H)
+
+
+
                 # fmag = torch.sum(f_w_re[:,0,:]**2,dim=0)**0.5
                 # func.show_gray_image(fmag.cpu().numpy())
 
@@ -365,14 +378,9 @@ def calc_spacial_metrics_UCF101():
                 # sum = sum[:,:,None].repeat(1,1,3)
                 # func.overlay_mask(sum, fmag.cpu().numpy())
 
-                flows = raftof.predict_flow_batch(i1[None,:] , i0[None,:])
-
-                v = torch.stack([i0,i1])
-                func.play_tensor_video_opencv(v,fps=1)
-
-                i0_warp = func.warp_batch(i1[None,:], flows)[0,:]
-                v = torch.stack([i0, i0_warp])
-                func.play_tensor_video_opencv(v,fps=1)
+                # i0_warp = func.warp_batch(i0[None,:], f)[0,:]
+                # v = torch.stack([i0,i1_mod[0,:]])
+                # func.play_tensor_video_opencv(v,fps=1)
 
 
                 pass
