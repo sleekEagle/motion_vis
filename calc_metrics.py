@@ -365,11 +365,13 @@ def calc_spacial_metrics_UCF101():
                 # sum = sum[:,:,None].repeat(1,1,3)
                 # func.overlay_mask(sum, fmag.cpu().numpy())
 
+                flows = raftof.predict_flow_batch(i1[None,:] , i0[None,:])
+
                 v = torch.stack([i0,i1])
                 func.play_tensor_video_opencv(v,fps=1)
 
-                i0_warp = func.warp_batch(i0[None,:], f[None,:])[0,:]
-                v = torch.stack([i0,i0_warp])
+                i0_warp = func.warp_batch(i1[None,:], flows)[0,:]
+                v = torch.stack([i0, i0_warp])
                 func.play_tensor_video_opencv(v,fps=1)
 
 
