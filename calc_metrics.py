@@ -366,6 +366,21 @@ def calc_spacial_metrics_UCF101():
             x = np.linspace(0, 1, len(logits))
             AUC_delete = float(np.trapezoid(logits, x))
 
+            logits = []
+            for idx in range(0, len(hm_sort_args)-1):
+                f_w_ = torch.zeros_like(f_w)
+                f_w_[:,:,:,:,hm_x[0:idx+1],hm_y[0:idx+1]] = f_w[:,:,:,:,hm_x[0:idx+1],hm_y[0:idx+1]]
+                f_w_re = func.fold_windows(f_w_, WINDOW, H)[:,0,:]
+                i1_mod = func.warp_batch(i0[None,:], f_w_re)
+                ordered_keys = [int(k) for k in ordered_keys]
+                i1_mod = F.interpolate(i1_mod, size=(v_clus.size(2),v_clus.size(3)), mode='bilinear', align_corners=False)[0,:]
+                v_ = func.replace_frame(v_clus, ordered_keys, clustered_ids_ord, p[1], i1_mod)
+                stats = func.get_pred_stats(model, v_, gt_class_idx, pred_logit)
+                l = stats['logit']
+                logits.append(l)
+            x = np.linspace(0, 1, len(logits))
+            AUC_insert = float(np.trapezoid(logits, x))
+
 
 
 
