@@ -383,7 +383,6 @@ def calc_spacial_metrics_UCF101():
                 # func.play_tensor_video_opencv(v,fps=1)
 
 
-                pass
 
             pass
 
