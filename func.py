@@ -66,6 +66,23 @@ def overlay_mask(img_np, mask_np):
     plt.tight_layout()
     plt.show(block=True)
 
+'''
+break a tensor into sliding windows
+input t: B,C,H,W
+'''
+def get_windows(t, window_w):
+    B,C,H,W = t.size()
+    stride = window_w
+    windows = F.unfold(t.float(), kernel_size=(window_w, window_w), stride=stride)
+    windows = windows.view(B, C, window_w, window_w, int(H/window_w), int(H/window_w))
+    return windows
+
+def fold_windows(t, w, H):
+    C = t.size(1)
+    t = t.view(1,C, w * w,-1)
+    t = F.fold(t[0,:], (H,H) , (w,w), stride=w)
+    return t
+
 def flow_to_rgb(flow):
     """
     Convert optical flow (2, H, W) to RGB image (H, W, 3)
@@ -728,14 +745,14 @@ class RAFT_OF:
 
         return flows[-1]
     
-    def predict_flow_video(self, video):
+    def predict_flow_video(self, video, out_size=(224,224)):
         img1_batch = video[:-1,:]
         img2_batch = video[1:,:]
-        flow = self.predict_flow_batch(img1_batch,img2_batch)[-1]
+        flow = self.predict_flow_batch(img1_batch,img2_batch)
 
         #resize flow if needed
-        if video.size(2)!=flow.size(2) or video.size(3)!=flow.size(3):
-            flow = self.resize_flow_interpolate(flow, target_size=(video.size(2), video.size(3)), mode='bilinear')
+        if flow.size(2)!=out_size[0] or flow.size(3)!=out_size[1]:
+            flow = self.resize_flow_interpolate(flow, target_size=(out_size[0], out_size[1]), mode='bilinear')
         return flow
 
     def visualize(self, img_batch, predicted_flows):

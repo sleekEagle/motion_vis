@@ -178,11 +178,7 @@ def show_images_seq(img1, img2):
 #     return heatmaps
 
 
-# def get_windows(t, window_w, stride):
-#     B,C,H,W = t.size()
-#     windows = F.unfold(t, kernel_size=(window_w, window_w), stride=stride)
-#     windows = windows.view(B, C, window_w, window_w, int(H/window_w), int(H/window_w))
-#     return windows
+
 
 
 # '''

@@ -236,11 +236,13 @@ def calc_temporal_metrics_UCF101():
         sm = structure_metrics(model, video, d, gt_class_idx, pred_logit)
         mm = motion_metrics(model, video, d, gt_class_idx, pred_logit)
 from PIL import Image
+raftof = func.RAFT_OF()
 
 def calc_spacial_metrics_UCF101():
     analysis_path = r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_motion_importance.json'
     output_path = r'C:\Users\lahir\Downloads\UCF101\analysis\ucf101_spacial'
     mask_path = r'C:\Users\lahir\Downloads\UCF101\analysis\ucf101_spacial'
+    WINDOW = 8
 
     #create model and data loader
     ucf101dm = func.UCF101_data_model()
@@ -277,6 +279,7 @@ def calc_spacial_metrics_UCF101():
 
         pair_importance = d['pair_analysis']['pair_importance']
         pairs = [pi[0] for pi in pair_importance if pi[0]!=[]]
+        pair_imp = [pi[1] for pi in pair_importance if pi[0]!=[]]
 
         hm_path = os.path.join(mask_path, gt_class, k)
         if not os.path.isdir(hm_path): continue
@@ -287,22 +290,113 @@ def calc_spacial_metrics_UCF101():
         cls_name = d['motion_importance']['gt_class']
         vid_path = ucf101dm.construct_vid_path(cls_name,g,c)
         video = ucf101dm.load_jpg_ucf101(vid_path,n=0).to(device)
-        clustered_ids = d['pair_analysis']['clustered_ids']
 
-        for p in pairs:
+        #create img batches for flow and generate flow for the motion pairs
+        clustered_ids = d['pair_analysis']['clustered_ids']
+        ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
+        clustered_ids_ord = {}
+        for key in ordered_keys:
+            clustered_ids_ord[int(key)] = clustered_ids[key]
+        cluster_frames = [clustered_ids_ord[key][0] for key in clustered_ids_ord]
+        img0_frames = cluster_frames[:-1]
+        img1_frames = cluster_frames[1:]
+
+        img0_batch, img1_batch = torch.empty(0).to(device), torch.empty(0).to(device)
+        for i in range(len(img1_frames)):
+            f0 = img0_frames[i]
+            f1 = img1_frames[i]
+            img0_batch = torch.concatenate([img0_batch,video[f0,:][None,:]])
+            img1_batch = torch.concatenate([img1_batch,video[f1,:][None,:]])
+        
+        flows = raftof.predict_flow_batch(img0_batch, img1_batch)
+
+        v_clus = func.create_new_video(video.permute(1,0,2,3), clustered_ids_ord)
+        for p_idx, p in enumerate(pairs):
             fname = f'dPred_dF_f_{p[0]},{p[1]}.png'
             hm_path = os.path.join(mask_path, gt_class, k, fname)
-            img = Image.open(hm_path)
-            img = np.array(img)
+            hm = Image.open(hm_path)
+            hm = np.array(hm)
+            H,W = hm.shape
+            assert H==W, 'Error: Height must be equal to the Width of the image'
+            hm_re = hm.reshape(H*W)
+            sort_args = np.argsort(hm_re)
+            sort_args = sort_args[::-1] # sort pixels in decending order
+            x = sort_args//H
+            y = sort_args%H
+
+            i0_idx = clustered_ids[str(p[0])][0]
+            i1_idx = clustered_ids[str(p[1])][0]
+            i0 = video[i0_idx,:]
+            i0 = F.interpolate(i0[None,:], size=(hm.shape[0],hm.shape[1]), mode='bilinear', align_corners=False)[0,:]
+            i1 = video[i1_idx,:]
+            i1 = F.interpolate(i1[None,:], size=(hm.shape[0],hm.shape[1]), mode='bilinear', align_corners=False)[0,:]
+            f = flows[p_idx,:]
+
+            #get sorted coodinated for heatmap patches
+            hm_w = func.get_windows(torch.tensor(hm[None,None,:]), WINDOW)
+            hm_sum = torch.sum(hm_w[0,0,:],dim=(0,1))
+            w_H = H//WINDOW
+            hm_sum_1d = hm_sum.view(w_H*w_H)
+            hm_sort_args = torch.argsort(hm_sum_1d)
+            hm_sort_args = torch.flip(hm_sort_args, dims=[0]) # sort in decending order
+            hm_x = hm_sort_args//w_H
+            hm_y = hm_sort_args%w_H
+
+            # testing
+            # sum = hm_sum[None,None,None,None,:].repeat(1,1,8,8,1,1)
+            # sum = (sum - sum.min())/(sum.max() - sum.min())
+            # sum = func.fold_windows(sum , WINDOW, H)[0,0,:]
+            # sum = sum[:,:,None].repeat(1,1,3)
+            # func.overlay_mask(sum, hm)
+
+            f_w = func.get_windows(f[None,:], WINDOW)
+            #remove motion in the important hm areas one by one: deletion test
+            for idx in range(0, len(hm_sort_args)-1):
+                f_w_ = f_w.clone()
+                f_w_[:,:,:,:,hm_x[0:idx+1],hm_y[0:idx+1]] = 0
+
+                # f_w_re = func.fold_windows(f_w_, WINDOW, H)
+                # fmag = torch.sum(f_w_re[:,0,:]**2,dim=0)**0.5
+                # func.show_gray_image(fmag.cpu().numpy())
+
+                # sum = hm_sum[None,None,None,None,:].repeat(1,1,8,8,1,1)
+                # sum = (sum - sum.min())/(sum.max() - sum.min())
+                # sum = func.fold_windows(sum , WINDOW, H)[0,0,:]
+                # sum = sum[:,:,None].repeat(1,1,3)
+                # func.overlay_mask(sum, fmag.cpu().numpy())
+
+                v = torch.stack([i0,i1])
+                func.play_tensor_video_opencv(v,fps=1)
+
+                i0_warp = func.warp_batch(i0[None,:], f[None,:])[0,:]
+                v = torch.stack([i0,i0_warp])
+                func.play_tensor_video_opencv(v,fps=1)
+
+
+                pass
+
+            pass
+
 
 
 
             
             
 
-        pass
+
+
+
+
+
+
+
+
+
+            pass
+
 
 '''
+
 
 ***********************************************************************************************
 ***********************************************************************************************
