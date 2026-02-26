@@ -10,6 +10,14 @@ from torchvision.models.feature_extraction import create_feature_extractor
 import func
 import json
 
+def read_json_file(path):
+    if os.path.exists(path):
+        with open(path, 'r', encoding='utf-8') as file:
+            data_dict = json.load(file)
+    else:
+        data_dict = {}
+    return data_dict
+
 '''
 replace the whole video with just one frame repeated
 and see how the prediction changes
@@ -208,6 +216,8 @@ def calc_video_motion_importance(model, video, gt_class_name, gt_idx, class_name
 '''
 UCF101 accuracy = 0.854
 '''
+import os
+
 def motion_importance_UCF101():
     #create model and data loader
     ucf101dm = func.UCF101_data_model()
@@ -223,43 +233,41 @@ def motion_importance_UCF101():
         class_labels[cls_name.lower()] = k
 
     output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_motion_importance.json')
-    
-    anlysis_data = {}
-    n_samples, n_correct = 0, 0
     for idx, batch in enumerate(inference_loader):
         print(f'{idx/len(inference_loader)*100:.0f} % is done.', end='\r')
+        data_dict = read_json_file(output_path)
+        if len(data_dict) == 0:
+            n_samples = 0
+            n_correct = 0
+        else:
+            n_samples = data_dict['n_samples']
+            n_correct = data_dict['n_correct']
+        if n_samples>0:
+            print(f'{n_samples/len(inference_loader)*100:.0f} % is done. ({n_samples} of {len(inference_loader)}). acc = {(n_correct/n_samples)*100:.2f}%', end='\r')
+
         inputs, targets = batch
         video = inputs[0].to('cuda')
-
         gt_class_name = targets[0][0].split('_')[1]
         gt_idx = class_labels[gt_class_name.lower()]
         file_name = targets[0][0]
 
-        # func.get_pred_stats(model, video, gt_idx, 0.820443332195282)
+        if file_name in data_dict: continue
 
         file_analysis = calc_video_motion_importance(model, video, gt_class_name, gt_idx, class_names)
-        if file_analysis == -1:
-            continue
 
-        seq = targets[0][1]
-        seq = ','.join([str(s) for s in seq])
-        file_analysis['seq'] = seq
-    
-        anlysis_data[file_name] = file_analysis
-
-        pred_class = file_analysis['motion_importance']['pred_original_class']
-        if pred_class.lower() == gt_class_name.lower():
+        if file_analysis!=-1:
             n_correct += 1
-
+            seq = targets[0][1]
+            seq = ','.join([str(s) for s in seq])
+            file_analysis['seq'] = seq
         n_samples += 1
 
-    accuracy = n_correct / n_samples
-    print(f'Overall accuracy: {accuracy:.3f}')
-    anlysis_data['accuracy'] = accuracy
-    anlysis_data['threshold'] = change_threshold
-    
-    with open(output_path, "w") as f:
-        json.dump(anlysis_data, f)
+        data_dict[file_name] = file_analysis
+        data_dict['n_samples'] = n_samples
+        data_dict['n_correct'] = n_correct
+
+        with open(output_path, "w") as f:
+            json.dump(data_dict, f)
 
 
 def motion_importance_ssv2():
@@ -273,26 +281,32 @@ def motion_importance_ssv2():
 
     d_names, paths = ssv2.get_ssv2_paths()
     n_samples, n_correct = 0, 0
-    anlysis_data = {}
     for d,p in zip(d_names, paths):
-        print(f'{n_samples/len(d_names)*100:.0f} % is done. ({n_samples} of {len(d_names)})', end='\r')
+        data_dict = read_json_file(output_path)
+        if d in data_dict: continue
+        if len(data_dict) == 0:
+            n_samples = 0
+            n_correct = 0
+        else:
+            n_samples = data_dict['n_samples']
+            n_correct = data_dict['n_correct']
+        if n_samples>0:
+            print(f'{n_samples/len(d_names)*100:.0f} % is done. ({n_samples} of {len(d_names)}). acc = {(n_correct/n_samples)*100:.2f}%', end='\r')
 
         gt_idx = model.label2id[d]
         v = model.video_from_path(p)['pixel_values'][0,:].permute(1,0,2,3)
         file_analysis = calc_video_motion_importance(model, v, d, gt_idx, class_names, max_solutions=2)
-        anlysis_data[d] = file_analysis
         
-        pred_class = file_analysis['motion_importance']['pred_original_class']
-        if pred_class.lower() == d.lower():
+        if file_analysis!=-1:
             n_correct += 1
         n_samples += 1
-    
-    accuracy = n_correct / n_samples
-    print(f'Overall accuracy: {accuracy:.3f}')
-    anlysis_data['accuracy'] = accuracy
-    anlysis_data['threshold'] = change_threshold
-    with open(output_path, "w") as f:
-        json.dump(anlysis_data, f)
+
+        data_dict[d] = file_analysis
+        data_dict['n_samples'] = n_samples
+        data_dict['n_correct'] = n_correct
+
+        with open(output_path, "w") as f:
+            json.dump(data_dict, f)
 
 #**************************************************************************************
 
