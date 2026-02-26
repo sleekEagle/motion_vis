@@ -282,8 +282,11 @@ def motion_importance_ssv2():
     d_names, paths = ssv2.get_ssv2_paths()
     n_samples, n_correct = 0, 0
     for d,p in zip(d_names, paths):
+        file_name = p.name.split('.')[0]
+        key = f'{d}_{file_name}'
+
         data_dict = read_json_file(output_path)
-        if d in data_dict: continue
+        if key in data_dict: continue
         if len(data_dict) == 0:
             n_samples = 0
             n_correct = 0
@@ -301,7 +304,7 @@ def motion_importance_ssv2():
             n_correct += 1
         n_samples += 1
 
-        data_dict[d] = file_analysis
+        data_dict[key] = file_analysis
         data_dict['n_samples'] = n_samples
         data_dict['n_correct'] = n_correct
 
@@ -324,7 +327,7 @@ def print_clus_ids(c):
 
 
 if __name__ == '__main__':
-    motion_importance_UCF101()
+    motion_importance_ssv2()
 
 
 
