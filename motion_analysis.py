@@ -18,6 +18,13 @@ def read_json_file(path):
         data_dict = {}
     return data_dict
 
+def read_json_line(path):
+    data = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            data.append(json.loads(line))
+    return data
+
 '''
 replace the whole video with just one frame repeated
 and see how the prediction changes
@@ -278,38 +285,30 @@ def motion_importance_ssv2():
     model.model.eval()
     class_names = list(model.label2id.keys())
     output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\ssv2_motion_importance.json')
+    if os.path.exists(output_path):
+        data = read_json_line(output_path)
+        n_samples = len(data)
+    else:
+        n_samples = 0
 
     d_names, paths = ssv2.get_ssv2_paths()
-    n_samples, n_correct = 0, 0
     for d,p in zip(d_names, paths):
         file_name = p.name.split('.')[0]
         key = f'{d}_{file_name}'
 
-        data_dict = read_json_file(output_path)
-        if key in data_dict: continue
-        if len(data_dict) == 0:
-            n_samples = 0
-            n_correct = 0
-        else:
-            n_samples = data_dict['n_samples']
-            n_correct = data_dict['n_correct']
-        if n_samples>0:
-            print(f'{n_samples/len(d_names)*100:.0f} % is done. ({n_samples} of {len(d_names)}). acc = {(n_correct/n_samples)*100:.2f}%', end='\r')
+        print(f'{n_samples/len(d_names)*100:.0f} % is done. ({n_samples} of {len(d_names)})', end='\r')
+        n_samples += 1
 
         gt_idx = model.label2id[d]
         v = model.video_from_path(p)['pixel_values'][0,:].permute(1,0,2,3)
         file_analysis = calc_video_motion_importance(model, v, d, gt_idx, class_names, max_solutions=2)
+        if file_analysis == -1:
+            continue
         
-        if file_analysis!=-1:
-            n_correct += 1
-        n_samples += 1
-
-        data_dict[key] = file_analysis
-        data_dict['n_samples'] = n_samples
-        data_dict['n_correct'] = n_correct
-
-        with open(output_path, "w") as f:
-            json.dump(data_dict, f)
+        d_ = {key: file_analysis}
+        with open(output_path, "a", encoding="utf-8") as f:
+            json.dump(d_, f)
+            f.write("\n")
 
 #**************************************************************************************
 
