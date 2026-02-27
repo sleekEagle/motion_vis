@@ -437,6 +437,14 @@ def get_cluster_frameids(cluster_ids, order_ids):
         frame_ids[i] = idx_ar
     return frame_ids
 
+def read_json_file(path):
+    if os.path.exists(path):
+        with open(path, 'r', encoding='utf-8') as file:
+            data_dict = json.load(file)
+    else:
+        data_dict = {}
+    return data_dict
+
 '''
 generate new cluster id given idx list
 this uses temporal freezing. 
