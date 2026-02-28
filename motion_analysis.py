@@ -326,7 +326,7 @@ def print_clus_ids(c):
 
 
 if __name__ == '__main__':
-    motion_importance_UCF101()
+    motion_importance_ssv2()
 
 
 

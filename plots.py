@@ -5,7 +5,8 @@ from PIL import Image
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-
+from pathlib import Path
+import func
 
 def plot_intro_image():
     json_path = r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_motion_importance.json'
@@ -136,10 +137,57 @@ def plot_intro_image():
 
     plt.savefig('plots/into_img.png', dpi=600, bbox_inches='tight')
 
+'''
+UCF101
+*************************************************************************
+avg acc: 0.8541
+avg n frames: 1.9741
+avg per change: 0.0702
+*************************************************************************
+'''
+def basic_stats():
+    # ucf101dm = func.UCF101_data_model()
+    # inference_loader = ucf101dm.inference_loader
+    # n_samples = len(inference_loader)
+    n_samples = 3783
 
+    output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_motion_importance.json')
+    if os.path.exists(output_path):
+        data = func.read_json_line(output_path)
+    acc = len(data)/n_samples
+    avg_per_change = 0
+    avg_n_frames = 0
+    for d in data:
+        dict = d[list(d.keys())[0]]
+        if dict['single_frame_structure']:
+            avg_n_frames += 1
+            no_motion_logit = dict['motion_importance']['max_frame_logit']
+            orig_logit = dict['motion_importance']['pred_original_logit']
+            avg_per_change += (orig_logit-no_motion_logit)/orig_logit
+            continue
+        else:
+            avg_n_frames += len(list(dict['pair_analysis']['clustered_ids'].keys()))
+            pi = dict['pair_analysis']['pair_importance']
+            assert pi[0][0] == [] or len(pi) == 1, 'Error in pair importance'
+            if pi[0][0] == []:
+                no_motion_logit = pi[0][1]
+            elif len(pi) == 1:
+                no_motion_logit = pi[0][1]
+            orig_logit = dict['motion_importance']['pred_original_logit']
+            avg_per_change += (orig_logit-no_motion_logit)/orig_logit
+    
+    avg_per_change/=n_samples
+    avg_n_frames/=n_samples
+
+    print('*************************************************************************')
+    print(f'avg acc: {acc:.4f}')
+    print(f'avg n frames: {avg_n_frames:.4f}')
+    print(f'avg per change: {avg_per_change:.4f}')
+    print('*************************************************************************')
+    
 
 if __name__ == '__main__':
-    plot_intro_image()
+    basic_stats()
 
 
 
