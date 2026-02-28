@@ -532,10 +532,9 @@ def spacial_analysis_UCF101():
 
         pair_importance = d['pair_analysis']['pair_importance']
         pairs = [pi[0] for pi in pair_importance if pi[0]!=[]]
-        # if len(pairs)==0: 
-        #     pass
-        # else:
-        #     continue
+        
+        if len(pairs)==0: continue
+        
         clustered_ids = d['pair_analysis']['clustered_ids']
         ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
         frame_ids = func.get_cluster_frameids(clustered_ids, ordered_keys)
@@ -557,7 +556,7 @@ def spacial_analysis_UCF101():
         #save imgs
         for k_idx, key in enumerate(keys):
             str_p = ','.join([str(p) for p in analysis[key]['pair']])
-            splt = str_p.split(',')[0]
+            splt = str_p.split(',')
             save_rgb(analysis[key]['img0'], os.path.join(out_dir, f'img_{splt[0]}.png'))
             if k_idx == len(keys)-1:
                 save_rgb(analysis[key]['img1'], os.path.join(out_dir, f'img_{splt[1]}.png'))
