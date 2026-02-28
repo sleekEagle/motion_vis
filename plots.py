@@ -38,20 +38,10 @@ def add_right_padding_pil(image_path, padding_width, padding_color=(0, 0, 0)):
     
     return img_array
 
-# ucf101dm = func.UCF101_data_model()
-# model = ucf101dm.model
-# model.to('cuda')
-# model.eval()
-# inference_loader = ucf101dm.inference_loader
-# class_names = ucf101dm.inference_class_names
-
-# class_labels = {}
-# for k in class_names.keys():
-#     cls_name = class_names[k]
-#     class_labels[cls_name.lower()] = k
-
-data = func.read_json_file(json_path)
-pi = data['v_Archery_g05_c03']['pair_analysis']['pair_importance'][1:]
+data = func.read_json_line(json_path)
+idx = [i for i,d in enumerate(data) if list(d.keys())[0]=='v_Archery_g05_c03'][0]
+pi = data[idx]['v_Archery_g05_c03']['pair_analysis']['pair_importance'][1:]
+imp_vals = [i[1] for i in pi]
 
 #load images
 pad = 10
@@ -59,6 +49,20 @@ path = os.path.join(result_path, f"img_*")
 files = glob.glob(path)
 imgs = [add_right_padding_pil(file, padding_width=pad) for file in files]
 img_stack = np.hstack(imgs)
+
+#plot the importance at the in-betweens among the images
+x_val = 0
+w = imgs[0].shape[0]
+x_val_ar = []
+for i in range(len(imgs)-1):
+    if i==0: x_val = w + pad/2
+    else:
+        x_val += w + pad
+    x_val_ar.append(x_val)
+
+
+
+
 
 func.show_rgb_image(img_stack)
 

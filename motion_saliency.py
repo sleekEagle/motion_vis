@@ -502,9 +502,12 @@ def spacial_analysis_UCF101():
         cls_name = class_names[k]
         class_labels[cls_name.lower()] = k
 
-    with open(analysis_path, 'r', encoding='utf-8') as file:
-        data_dict = json.load(file)
-    
+    data = func.read_json_line(analysis_path)
+    data_dict = {}
+    for d in data:
+        key = list(d.keys())[0]
+        data_dict[key] = d[key]
+
     for i, k in enumerate(data_dict):
         print(f'Processing sample {i+1}/{len(data_dict)}: {k}', end='\r')
 
@@ -521,8 +524,18 @@ def spacial_analysis_UCF101():
         if gt_class.lower() != pred_class.lower():
             continue
 
+        out_dir =  os.path.join(output_path, gt_class, k)
+        if os.path.exists(out_dir):
+            continue
+        else:
+            os.makedirs(out_dir, exist_ok=True)
+
         pair_importance = d['pair_analysis']['pair_importance']
         pairs = [pi[0] for pi in pair_importance if pi[0]!=[]]
+        # if len(pairs)==0: 
+        #     pass
+        # else:
+        #     continue
         clustered_ids = d['pair_analysis']['clustered_ids']
         ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
         frame_ids = func.get_cluster_frameids(clustered_ids, ordered_keys)
@@ -542,15 +555,19 @@ def spacial_analysis_UCF101():
         keys = analysis.keys()
 
         #save imgs
-        out_dir =  os.path.join(output_path, gt_class, k) 
-        os.makedirs(out_dir, exist_ok=True)
-        for key in keys:
+        for k_idx, key in enumerate(keys):
             str_p = ','.join([str(p) for p in analysis[key]['pair']])
-            save_rgb(analysis[key]['img'], os.path.join(out_dir, f'img_{str_p}.png'))
+            splt = str_p.split(',')[0]
+            save_rgb(analysis[key]['img0'], os.path.join(out_dir, f'img_{splt[0]}.png'))
+            if k_idx == len(keys)-1:
+                save_rgb(analysis[key]['img1'], os.path.join(out_dir, f'img_{splt[1]}.png'))
+
             save_grey(analysis[key]['dPred_dF'], os.path.join(out_dir, f'dPred_dF_{str_p}.png'))
             save_grey(analysis[key]['dPred_dF*flow'], os.path.join(out_dir, f'dPred_dF_f_{str_p}.png'))
+            save_grey(analysis[key]['flow_mag'], os.path.join(out_dir, f'flowmag_{str_p}.png'))
+
             #create overlay            
-            img = analysis[key]['img']
+            img = analysis[key]['img1']
             hm = analysis[key]['dPred_dF*flow']
             overlay = get_overlay_img(img, hm)
             save_rgb(np.transpose(overlay, (2,0,1)), os.path.join(out_dir, f'overlay_{str_p}.png'))

@@ -437,6 +437,7 @@ def get_cluster_frameids(cluster_ids, order_ids):
         frame_ids[i] = idx_ar
     return frame_ids
 
+#if the json file was written the whole dict at once
 def read_json_file(path):
     if os.path.exists(path):
         with open(path, 'r', encoding='utf-8') as file:
@@ -444,6 +445,13 @@ def read_json_file(path):
     else:
         data_dict = {}
     return data_dict
+#if the json file was written line by line
+def read_json_line(path):
+    data = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            data.append(json.loads(line))
+    return data
 
 '''
 generate new cluster id given idx list
@@ -1140,7 +1148,13 @@ class GradcamModel(nn.Module):
             f_mean = f.mean(dim=(0,1))[None,None,:]
             f_res = f - f_mean
             f_mag = torch.sum(f_res**2,dim=2)**0.5
-            f_mag = (f_mag-f_mag.min())/(f_mag.max()-f_mag.min()+1e-5)
+
+            tau = np.percentile(f_mag.cpu().numpy(), 90) 
+            #remove noise (very small values)
+            f_mag[f_mag<tau] = 0
+
+            f_mag = (f_mag-f_mag.min())/(f_mag.max()-f_mag.min())
+            # show_gray_image(f_mag.cpu().numpy())
 
             d = {
                 'pair': p,
@@ -1148,7 +1162,8 @@ class GradcamModel(nn.Module):
                 'dPred_dF*flow': (dPred_dF*f_mag).cpu().numpy(),
                 'flow': f.cpu().numpy(),
                 'flow_mag': f_mag.cpu().numpy(),
-                'img': img1[0,:].cpu().numpy()
+                'img0': img0[0,:].cpu().numpy(),
+                'img1': img1[0,:].cpu().numpy()
             }
 
             ret[idx] = d

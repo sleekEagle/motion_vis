@@ -240,41 +240,38 @@ def motion_importance_UCF101():
         class_labels[cls_name.lower()] = k
 
     output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_motion_importance.json')
+    if os.path.exists(output_path):
+        data = read_json_line(output_path)
+        keys = [list(d.keys())[0] for d in data]
+        n_samples = len(data)
+    else:
+        keys = []
+        n_samples = 0
+    
     for idx, batch in enumerate(inference_loader):
-        print(f'{idx/len(inference_loader)*100:.0f} % is done.', end='\r')
-        data_dict = read_json_file(output_path)
-        if len(data_dict) == 0:
-            n_samples = 0
-            n_correct = 0
-        else:
-            n_samples = data_dict['n_samples']
-            n_correct = data_dict['n_correct']
-        if n_samples>0:
-            print(f'{n_samples/len(inference_loader)*100:.0f} % is done. ({n_samples} of {len(inference_loader)}). acc = {(n_correct/n_samples)*100:.2f}%', end='\r')
-
+        print(f'{n_samples/len(inference_loader)*100:.0f} % is done. ({n_samples} of {len(inference_loader)})', end='\r')
+        n_samples += 1
+        
         inputs, targets = batch
         video = inputs[0].to('cuda')
         gt_class_name = targets[0][0].split('_')[1]
         gt_idx = class_labels[gt_class_name.lower()]
         file_name = targets[0][0]
 
-        if file_name in data_dict: continue
+        if file_name in keys: continue
 
         file_analysis = calc_video_motion_importance(model, video, gt_class_name, gt_idx, class_names)
-
-        if file_analysis!=-1:
-            n_correct += 1
+        if file_analysis == -1:
+            continue
+        else:
             seq = targets[0][1]
             seq = ','.join([str(s) for s in seq])
             file_analysis['seq'] = seq
-        n_samples += 1
 
-        data_dict[file_name] = file_analysis
-        data_dict['n_samples'] = n_samples
-        data_dict['n_correct'] = n_correct
-
-        with open(output_path, "w") as f:
-            json.dump(data_dict, f)
+        d_ = {file_name: file_analysis}
+        with open(output_path, "a", encoding="utf-8") as f:
+            json.dump(d_, f)
+            f.write("\n")
 
 
 def motion_importance_ssv2():
@@ -287,14 +284,17 @@ def motion_importance_ssv2():
     output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\ssv2_motion_importance.json')
     if os.path.exists(output_path):
         data = read_json_line(output_path)
+        keys = [list(d.keys())[0] for d in data]
         n_samples = len(data)
     else:
+        keys = []
         n_samples = 0
 
     d_names, paths = ssv2.get_ssv2_paths()
     for d,p in zip(d_names, paths):
         file_name = p.name.split('.')[0]
         key = f'{d}_{file_name}'
+        if file_name in keys: continue
 
         print(f'{n_samples/len(d_names)*100:.0f} % is done. ({n_samples} of {len(d_names)})', end='\r')
         n_samples += 1
@@ -326,7 +326,7 @@ def print_clus_ids(c):
 
 
 if __name__ == '__main__':
-    motion_importance_ssv2()
+    motion_importance_UCF101()
 
 
 
