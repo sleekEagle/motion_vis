@@ -429,5 +429,5 @@ def calc_spacial_metrics_UCF101():
     
 
 if __name__ == '__main__':
-    calc_spacial_metrics_UCF101()
+    calc_temporal_metrics_UCF101()
 

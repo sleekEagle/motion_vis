@@ -281,7 +281,7 @@ def motion_importance_ssv2():
     model = VJEPA2()
     model.model.eval()
     class_names = list(model.label2id.keys())
-    output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\ssv2_motion_importance.json')
+    output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\ssv2_new.json')
     if os.path.exists(output_path):
         data = read_json_line(output_path)
         keys = [list(d.keys())[0] for d in data]
@@ -289,15 +289,50 @@ def motion_importance_ssv2():
     else:
         keys = []
         n_samples = 0
+    keys = list(set(keys))
+    last_key = keys[-1]
 
     d_names, paths = ssv2.get_ssv2_paths()
-    for d,p in zip(d_names, paths):
+    for start_idx,(d,p) in enumerate(zip(d_names, paths)):
         file_name = p.name.split('.')[0]
         key = f'{d}_{file_name}'
-        if file_name in keys: continue
+        if key == last_key:
+            break        
 
-        print(f'{n_samples/len(d_names)*100:.0f} % is done. ({n_samples} of {len(d_names)})', end='\r')
-        n_samples += 1
+    # output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\ssv2_.json')
+    # kk = []
+    # for d,p in zip(d_names, paths):
+    #     file = p.name.split('.')[0]
+    #     k = f'{d}_{file}'
+    #     if k in keys:
+    #         kk.append(k)
+    #         idx = keys.index(k)
+    #         d_ = {k: data[idx]}
+    #         with open(output_path, "a", encoding="utf-8") as f:
+    #             json.dump(d_, f)
+    #             f.write("\n")
+    # kk = set(kk)
+
+
+
+    # for d in new_list:
+    #     with open(output_path, "a", encoding="utf-8") as f:
+    #             json.dump(d, f)
+    #             f.write("\n")
+
+    # names = []
+    # for d,p in zip(d_names, paths):
+    #     file_name = p.name.split('.')[0]
+    #     key = f'{d}_{file_name}'
+    #     names.append(key)
+    # names = set(names)
+    # keys = set(keys)
+    for idx, (d,p) in enumerate(zip(d_names, paths)):
+        if idx <= start_idx:continue
+        file_name = p.name.split('.')[0]
+        key = f'{d}_{file_name}'
+
+        print(f'{idx/len(d_names)*100:.0f} % is done. ({idx} of {len(d_names)})', end='\r')
 
         gt_idx = model.label2id[d]
         v = model.video_from_path(p)['pixel_values'][0,:].permute(1,0,2,3)
