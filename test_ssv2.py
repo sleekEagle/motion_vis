@@ -27,8 +27,11 @@ def test_s2s():
         print(f'{idx} of {n_files} is done.', end='\r')
         gt_idx = model.label2id[d_names[idx]]
         with torch.no_grad():
-            preds = model.predict_from_path(p)
-            if preds==gt_idx:
+            # preds = model.predict_from_path(p)
+            v = model.video_from_path(p)['pixel_values'][0,:].permute(1,0,2,3)
+            preds = model(v[None,:])
+            pred_idx = torch.argmax(preds,dim=1).item()
+            if pred_idx==gt_idx:
                 n_correct += 1
         n_samples += 1
     print(f'Accuracy = {n_correct/n_samples*100} \%')
