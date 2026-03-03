@@ -37,6 +37,7 @@ def test_s2s():
 
     n_correct = 0
     n_samples = 0
+
     for idx, p in enumerate(paths):
         print(f'{idx} of {n_files} is done.', end='\r')
         gt_idx = model.label2id[d_names[idx]]
@@ -49,6 +50,9 @@ def test_s2s():
             # pred_idx = torch.argmax(preds,dim=1).item()
             if ret['pred_original_idx']==gt_idx:
                 n_correct += 1
+            else:
+                with open(r'C:\Users\lahir\Downloads\UCF101\analysis\ssv2_incorrect.txt', 'w') as file:
+                    file.write(str(p))
         n_samples += 1
     print(f'Accuracy = {n_correct/n_samples*100} \%')
 

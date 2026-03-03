@@ -30,12 +30,14 @@ replace the whole video with just one frame repeated
 and see how the prediction changes
 '''
 #**************************************************************************************
-def motion_importance(model, video, class_names):
+def motion_importance(model, video, class_names, gt_class_idx):
     # video = ucf101dm.load_jpg_ucf101(vid_path)
     # video = video.unsqueeze(0).permute(0,2,1,3,4)
     pred = model(video)
     pred = F.softmax(pred,dim=1)
     pred_cls = torch.argmax(pred,dim=1).item()
+    if pred_cls!=gt_class_idx: 
+        return -1
 
     logit_original = pred[:,pred_cls].item()
     logits = []
@@ -92,14 +94,12 @@ def get_uniqueval_indices(ids):
 change_threshold = 0.02
 def calc_video_motion_importance(model, video, gt_class_name, gt_idx, class_names, max_solutions=100):
     file_analysis = {}
-
-    ret = motion_importance(model, video.unsqueeze(0), class_names)
+    ret = motion_importance(model, video.unsqueeze(0), class_names, gt_idx)
+    if ret==-1:
+        return -1
     pred_logit = ret['pred_original_logit']
     pred_class = ret['pred_original_class']
     pred_class_idx = ret['pred_original_idx']
-
-    if pred_class_idx != gt_idx: # we conly consider correctly classified samples
-        return -1
 
     all_logits = ret['all_logits']
     lowest_perc_change = ret['lowest_perc_change']
@@ -138,17 +138,6 @@ def calc_video_motion_importance(model, video, gt_class_name, gt_idx, class_name
                 #check if the motion among the frames are important for this prediction
                 clustered_ids = dict(sorted(clustered_ids.items(), key=lambda x:x[1][0]))
                 pairs = func.get_motion_pairs(clustered_ids)
-
-                # check if there are adjecent frames with insignificant motion
-                # if there are any get rid of these pairs
-
-                # p = pairs[0]
-                # img1 = video[:,3,:].permute(1,2,0)
-                # img2 = video[:,12,:].permute(1,2,0)
-                # v = torch.cat((img1[None,:],img2[None,:]), dim=0)
-                # func.play_tensor_video_opencv(v,fps=1)
-
-                # func.play_tensor_video_opencv(v_.permute(1,2,3,0),fps=2)
                 
                 replace_order = []
                 p = pairs[0]
@@ -281,69 +270,68 @@ def motion_importance_ssv2():
     model = VJEPA2()
     model.model.eval()
     class_names = list(model.label2id.keys())
-    output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\ssv2_new.json')
-    if os.path.exists(output_path):
-        data = read_json_line(output_path)
-        keys = [list(d.keys())[0] for d in data]
-        n_samples = len(data)
-    else:
-        keys = []
-        n_samples = 0
-    keys = list(set(keys))
-    last_key = keys[-1]
+    incorrect_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\ssv2_correct.txt')
+    with open(incorrect_path, 'r') as file:
+        lines = file.readlines()
+
+    correct_keys = []
+    for l in lines:
+        l = l.rstrip('\n')
+        file_name = l.split('\\')[-1].split('.')[0]
+        d = l.split('\\')[-2]
+        key = f'{d}_{file_name}'
+        correct_keys.append(key)
 
     d_names, paths = ssv2.get_ssv2_paths()
-    for start_idx,(d,p) in enumerate(zip(d_names, paths)):
-        file_name = p.name.split('.')[0]
-        key = f'{d}_{file_name}'
-        if key == last_key:
-            break        
-
-    # output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\ssv2_.json')
-    # kk = []
-    # for d,p in zip(d_names, paths):
-    #     file = p.name.split('.')[0]
-    #     k = f'{d}_{file}'
-    #     if k in keys:
-    #         kk.append(k)
-    #         idx = keys.index(k)
-    #         d_ = {k: data[idx]}
-    #         with open(output_path, "a", encoding="utf-8") as f:
-    #             json.dump(d_, f)
-    #             f.write("\n")
-    # kk = set(kk)
-
-
-
-    # for d in new_list:
-    #     with open(output_path, "a", encoding="utf-8") as f:
-    #             json.dump(d, f)
-    #             f.write("\n")
-
-    # names = []
-    # for d,p in zip(d_names, paths):
+    # count=0
+    # for idx, (d,p) in enumerate(zip(d_names, paths)):
     #     file_name = p.name.split('.')[0]
     #     key = f'{d}_{file_name}'
-    #     names.append(key)
-    # names = set(names)
-    # keys = set(keys)
+    #     if key in correct_keys: 
+    #         count+=1
+    output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\ssv2_output.txt')
     for idx, (d,p) in enumerate(zip(d_names, paths)):
-        if idx <= start_idx:continue
         file_name = p.name.split('.')[0]
         key = f'{d}_{file_name}'
+        if key not in correct_keys: 
+            continue
 
         print(f'{idx/len(d_names)*100:.0f} % is done. ({idx} of {len(d_names)})', end='\r')
 
         gt_idx = model.label2id[d]
         v = model.video_from_path(p)['pixel_values'][0,:].permute(1,0,2,3)
         file_analysis = calc_video_motion_importance(model, v, d, gt_idx, class_names, max_solutions=2)
-        if file_analysis == -1:
-            continue
-        
+
+        assert file_analysis!=-1,'fileanalysis error!'
+
         d_ = {key: file_analysis}
         with open(output_path, "a", encoding="utf-8") as f:
             json.dump(d_, f)
             f.write("\n")
+
+
+def ssv2_test():
+    from models.ssv2 import VJEPA2
+    from dataloaders import ssv2
+
+    model = VJEPA2()
+    model.model.eval()
+    class_names = list(model.label2id.keys())
+
+    d_names, paths = ssv2.get_ssv2_paths()
+
+    n_correct = 0
+    for idx, (d,p) in enumerate(zip(d_names, paths)):
+        print(f'{idx/len(d_names)*100:.0f} % is done. ({idx} of {len(d_names)})', end='\r')
+
+        gt_idx = model.label2id[d]
+        v = model.video_from_path(p)['pixel_values'][0,:].permute(1,0,2,3)
+        ret = motion_importance(model, v[None,:], class_names, gt_idx)
+        if ret!=-1:
+            n_correct+=1
+            with open(r'C:\Users\lahir\Downloads\UCF101\analysis\ssv2_correct.txt', 'a') as file:
+                    file.write(f'{p}\n')
+    print(f'acc={n_correct/len(d_names):.4f}')
 
 #**************************************************************************************
 
