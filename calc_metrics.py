@@ -193,6 +193,9 @@ def motion_metrics(model, video, d, gt_class_idx, pred_logit):
         num = [n for n in numbers if n not in keep_pairs_flat]
         solutions = func.sample_fill_array(num, keep_pairs, remove_pairs)
         p = func.get_avg_pred(model, video, clustered_ids, solutions)
+
+
+
         l = p[:,gt_class_idx]
         logits.append(l.item())
     x = np.linspace(0, 1, len(logits))
@@ -238,20 +241,25 @@ def calc_temporal_metrics_UCF101():
         #we consider only correctly lassified sampless
         assert gt_class.lower() == pred_class.lower(), 'Error! incorrect prediction detected'
 
+        if 'pair_analysis' in d and len(d['pair_analysis']['clustered_ids'])==3: continue
+
         g = k.split('_')[2][1:]
         c = k.split('_')[3][1:]
         vid_path = ucf101dm.construct_vid_path(gt_class, g, c)
         video = ucf101dm.load_jpg_ucf101(vid_path,n=0).to(device)
-        sm = structure_metrics(model, video, d, gt_class_idx, pred_logit)
-        mm = motion_metrics(model, video, d, gt_class_idx, pred_logit)
-        d_ = {
+        try:
+            sm = structure_metrics(model, video, d, gt_class_idx, pred_logit)
+            mm = motion_metrics(model, video, d, gt_class_idx, pred_logit)
+            d_ = {
             'structure_metrics': sm,
             'motion_metrics': mm
              }
-        
-        with open(output_path, "a", encoding="utf-8") as f:
-            json.dump(d_, f)
-            f.write("\n")
+            with open(output_path, "a", encoding="utf-8") as f:
+                json.dump(d_, f)
+                f.write("\n")
+        except:
+            pass
+
         
         pass
 
