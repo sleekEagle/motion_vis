@@ -51,6 +51,9 @@ def structure_metrics(model, video, d, gt_class_idx, pred_logit):
     metrics['per_change'] = per_change
     metrics['n_frames'] = n_frames
     metrics['change_frames'] = change_frames
+
+    if d['single_frame_structure']: 
+        return metrics
     
     #remove unimportant frames one by one and see how the prediciton is affected
     all_frames = np.arange(0,video.size(0))
@@ -123,6 +126,8 @@ def structure_metrics(model, video, d, gt_class_idx, pred_logit):
 
 def motion_metrics(model, video, d, gt_class_idx, pred_logit):
     metrics = {}
+    if d['single_frame_structure']: 
+        return metrics
 
     clustered_ids = d['pair_analysis']['clustered_ids']
     dict_ = {}
@@ -136,6 +141,11 @@ def motion_metrics(model, video, d, gt_class_idx, pred_logit):
     l = stats['logit']
 
     #sort pairs according to importance
+    if len(d['pair_analysis']['pair_importance']) == 1:
+        p_imp = d['pair_analysis']['pair_importance'][0]
+        p = p_imp[0]
+        pass
+
     p_imp = d['pair_analysis']['pair_importance'][1:]
     p_ = [p[0] for p in p_imp]
     p_imp_= [p[1] for p in p_imp]
@@ -168,9 +178,9 @@ def motion_metrics(model, video, d, gt_class_idx, pred_logit):
     logits = logit_rand + logits
     x = np.linspace(0, 1, len(logits))
     AUC_insert = float(np.trapezoid(logits, x))
-    metrics['AUC_insert'] = AUC_insert
+    metrics['motion_AUC_insert'] = AUC_insert
 
-    #deletion test. Start with all motion pairs, add delete one motion pair one by one
+    #deletion test. Start with all motion pairs, delete one motion pair one by one
     ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
     v = func.create_new_video(video, clustered_ids, ordered_keys)
     stats = func.get_pred_stats(model, v, gt_class_idx, pred_logit)
@@ -187,7 +197,7 @@ def motion_metrics(model, video, d, gt_class_idx, pred_logit):
         logits.append(l.item())
     x = np.linspace(0, 1, len(logits))
     AUC_delete = float(np.trapezoid(logits, x))
-    metrics['AUC_delete'] = AUC_delete
+    metrics['motion_AUC_delete'] = AUC_delete
         
     return metrics
 
@@ -199,7 +209,9 @@ calc metrics for UCF101 dataset
 ***********************************************************************************************
 '''
 def calc_temporal_metrics_UCF101():
-    analysis_path = r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_motion_importance.json'
+    analysis_path = r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_temporal.json'
+    if os.path.exists(analysis_path):
+        data = func.read_json_line(analysis_path)
 
     #create model and data loader
     ucf101dm = func.UCF101_data_model()
@@ -213,13 +225,9 @@ def calc_temporal_metrics_UCF101():
         cls_name = class_names[k]
         class_labels[cls_name.lower()] = k
 
-    
-    output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_motion_importance.json')
-    if os.path.exists(output_path):
-        data = func.read_json_line(output_path)
-
+    output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_temporal_metrics.json')
     for i, d in enumerate(data):
-        print(f'Processing sample {i+1}/{len(data)}: {k}', end='\r')
+        print(f'Processing sample {i+1} of {len(data)}', end='\r')
         k = list(d.keys())[0]
         d = d[k]
         gt_class = d['motion_importance']['gt_class']
@@ -236,6 +244,19 @@ def calc_temporal_metrics_UCF101():
         video = ucf101dm.load_jpg_ucf101(vid_path,n=0).to(device)
         sm = structure_metrics(model, video, d, gt_class_idx, pred_logit)
         mm = motion_metrics(model, video, d, gt_class_idx, pred_logit)
+        d_ = {
+            'structure_metrics': sm,
+            'motion_metrics': mm
+             }
+        
+        with open(output_path, "a", encoding="utf-8") as f:
+            json.dump(d_, f)
+            f.write("\n")
+        
+        pass
+
+
+
 from PIL import Image
 raftof = func.RAFT_OF()
 

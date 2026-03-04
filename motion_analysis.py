@@ -178,6 +178,7 @@ def calc_video_motion_importance(model, video, gt_class_name, gt_idx, class_name
                 pairs = func.get_motion_pairs(clustered_ids)
 
                 pair_avg_logit = []
+                #is there a bug here?
                 if len(pairs)==2:
                     pair = pairs[1]
                     v_ = func.create_new_video(video, clustered_ids, (pair[1], pair[0]))
@@ -247,6 +248,8 @@ def motion_importance_UCF101():
         gt_idx = class_labels[gt_class_name.lower()]
         file_name = targets[0][0]
 
+        # if file_name!='v_ApplyEyeMakeup_g02_c04': continue
+
         if file_name in keys: continue
 
         file_analysis = calc_video_motion_importance(model, video, gt_class_name, gt_idx, class_names)
@@ -257,10 +260,10 @@ def motion_importance_UCF101():
             seq = ','.join([str(s) for s in seq])
             file_analysis['seq'] = seq
 
-        d_ = {file_name: file_analysis}
-        with open(output_path, "a", encoding="utf-8") as f:
-            json.dump(d_, f)
-            f.write("\n")
+        # d_ = {file_name: file_analysis}
+        # with open(output_path, "a", encoding="utf-8") as f:
+        #     json.dump(d_, f)
+        #     f.write("\n")
 
 
 def motion_importance_ssv2():
@@ -349,7 +352,7 @@ def print_clus_ids(c):
 
 
 if __name__ == '__main__':
-    motion_importance_ssv2()
+    motion_importance_UCF101()
 
 
 
