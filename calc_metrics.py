@@ -9,6 +9,7 @@ import os
 import sam_ui
 import random
 from PIL import Image
+from pathlib import Path
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -27,20 +28,21 @@ def save_grey(img, path):
 
 
 def structure_metrics(model, video, d, gt_class_idx, pred_logit):
+    sfs = d['single_frame_structure']
     metrics = {}
     if sfs:
         mimp = d['motion_importance']
         best_frame = int(np.argmax(np.array(mimp['all_logits'])))
         v = video[best_frame,:].unsqueeze(0).repeat(16,1,1,1)
         v = v.permute(1,0,2,3)
-        n_frames = 1/video.size(0)    
+        n_frames = 1
         imp_frames = [best_frame]
     else:
         clustered_ids = d['pair_analysis']['clustered_ids']
         ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
         imp_frames = [clustered_ids[k][0] for k in ordered_keys]
         v = func.create_new_video(video.permute(1,0,2,3), clustered_ids, ordered_keys)
-        n_frames = len(ordered_keys)/video.size(0)
+        n_frames = len(ordered_keys)
 
     pred_stats_clus = func.get_pred_stats(model, v, gt_class=gt_class_idx, orig_pred_logit=pred_logit)
     per_change = max(1e-5, pred_stats_clus['per_change'])
@@ -74,7 +76,7 @@ def structure_metrics(model, video, d, gt_class_idx, pred_logit):
     clustered_ids = d['pair_analysis']['clustered_ids']
     clustered_idx = [clustered_ids[k][0] for k in clustered_ids]
     ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
-    pred_logits = [stats['logit']]
+    pred_logits = [d['pair_analysis']['all_imp_pairs_logit']]
     for i in range(0, len(unimp_frames)):
         add_ar = unimp_frames[0:i+1]
         clusters = func.temporal_freeze(idx_list=clustered_idx+add_ar)
@@ -134,7 +136,7 @@ def motion_metrics(model, video, d, gt_class_idx, pred_logit):
     l = stats['logit']
 
     #sort pairs according to importance
-    p_imp = d['pair_analysis']['pair_importance']
+    p_imp = d['pair_analysis']['pair_importance'][1:]
     p_ = [p[0] for p in p_imp]
     p_imp_= [p[1] for p in p_imp]
     if p_[0]==[None,None]:
@@ -154,11 +156,11 @@ def motion_metrics(model, video, d, gt_class_idx, pred_logit):
 
     logits = []
     for i in range(len(pairs_sort)):
-        keep_pairs = pairs_sort[:i+1]
-        forbidden_pairs = pairs_sort[i+1:]
-        keep_pairs_flat = [p_ for p in keep_pairs for p_ in p]
-        num = [n for n in numbers if n not in keep_pairs_flat]
-        solutions = func.sample_fill_array(num, keep_pairs, forbidden_pairs)
+        keep_pairs_ = pairs_sort[:i+1]
+        forbidden_pairs_ = pairs_sort[i+1:]
+        keep_pairs_flat_ = [p_ for p in keep_pairs_ for p_ in p]
+        num = [n for n in numbers if n not in keep_pairs_flat_]
+        solutions = func.sample_fill_array(num, keep_pairs_, forbidden_pairs_)
         p = func.get_avg_pred(model, video, clustered_ids, solutions)
         l = p[:,gt_class_idx]
         logits.append(l.item())
@@ -211,27 +213,26 @@ def calc_temporal_metrics_UCF101():
         cls_name = class_names[k]
         class_labels[cls_name.lower()] = k
 
-    with open(analysis_path, 'r', encoding='utf-8') as file:
-        data_dict = json.load(file)
     
-    for i, k in enumerate(data_dict):
-        print(f'Processing sample {i+1}/{len(data_dict)}: {k}', end='\r')
-        d = data_dict[k]
+    output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_motion_importance.json')
+    if os.path.exists(output_path):
+        data = func.read_json_line(output_path)
+
+    for i, d in enumerate(data):
+        print(f'Processing sample {i+1}/{len(data)}: {k}', end='\r')
+        k = list(d.keys())[0]
+        d = d[k]
         gt_class = d['motion_importance']['gt_class']
-        print(f'Class: {gt_class}')
         gt_class_idx = class_labels[gt_class.lower()]
         pred_logit = d['motion_importance']['pred_original_logit']
         pred_class = d['motion_importance']['pred_original_class']
 
         #we consider only correctly lassified sampless
-        if gt_class.lower() != pred_class.lower():
-            continue
-        sfs = d['single_frame_structure']
+        assert gt_class.lower() == pred_class.lower(), 'Error! incorrect prediction detected'
 
         g = k.split('_')[2][1:]
         c = k.split('_')[3][1:]
-        cls_name = d['motion_importance']['gt_class']
-        vid_path = ucf101dm.construct_vid_path(cls_name,g,c)
+        vid_path = ucf101dm.construct_vid_path(gt_class, g, c)
         video = ucf101dm.load_jpg_ucf101(vid_path,n=0).to(device)
         sm = structure_metrics(model, video, d, gt_class_idx, pred_logit)
         mm = motion_metrics(model, video, d, gt_class_idx, pred_logit)

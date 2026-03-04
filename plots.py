@@ -149,11 +149,19 @@ def basic_stats():
     # ucf101dm = func.UCF101_data_model()
     # inference_loader = ucf101dm.inference_loader
     # n_samples = len(inference_loader)
+    
+    #for UCF101
     n_samples = 3783
+
+    #for ssv2
+    # n_samples = 27157
 
     output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_motion_importance.json')
     if os.path.exists(output_path):
         data = func.read_json_line(output_path)
+    n_correct = len(data)
+
+
     acc = len(data)/n_samples
     avg_per_change = 0
     avg_n_frames = 0
@@ -176,8 +184,8 @@ def basic_stats():
             orig_logit = dict['motion_importance']['pred_original_logit']
             avg_per_change += (orig_logit-no_motion_logit)/orig_logit
     
-    avg_per_change/=n_samples
-    avg_n_frames/=n_samples
+    avg_per_change/=n_correct
+    avg_n_frames/=n_correct
 
     print('*************************************************************************')
     print(f'avg acc: {acc:.4f}')
