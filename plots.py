@@ -192,10 +192,50 @@ def basic_stats():
     print(f'avg n frames: {avg_n_frames:.4f}')
     print(f'avg per change: {avg_per_change:.4f}')
     print('*************************************************************************')
+
+
+def temporal_metrics():
+    output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_temporal_metrics.json')
+    if os.path.exists(output_path):
+        data = func.read_json_line(output_path)
+    
+    avg_metrics = {
+        'per_change' : 0,
+        'n_frames' : 0,
+        'change_frames': 0,
+        'no_motion_logit': 0,
+        'all_motion_logit': 0,
+        'motion_AUC_insert': 0,
+        'motion_AUC_insert_rand': 0,
+        'motion_AUC_delete': 0,
+        'motion_AUC_delete_rand': 0,
+        'AUC_unimp_delete' : 0,
+        'AUC_unimp_add' : 0,
+        'AUC_imp_insert' : 0,
+        'AUC_imp_insert_rand': 0,
+        'AUC_imp_remove' : 0,
+        'AUC_imp_remove_rand': 0
+    }
+    count = 0
+    for d in data:
+        sm = d['structure_metrics']
+        mm = d['motion_metrics']
+        dict = sm | mm
+        if np.array([k in list(dict.keys()) for k in avg_metrics]).all():
+            no_m_l = dict['no_motion_logit']
+            motion_l = dict['all_motion_logit']
+            per_change = (motion_l-no_m_l)/motion_l
+            if per_change>0.03:
+                for key in avg_metrics:
+                    avg_metrics[key] += dict[key]
+                count += 1
+    
+    for k in avg_metrics:
+        print(f'{k}: {avg_metrics[k]/count}')
     
 
 if __name__ == '__main__':
-    basic_stats()
+    temporal_metrics()
 
 
 
