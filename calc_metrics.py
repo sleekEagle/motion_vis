@@ -355,13 +355,136 @@ def calc_temporal_metrics_ssv2():
 
 from PIL import Image
 raftof = func.RAFT_OF()
+analysis_path = r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_temporal.json'
+mask_path = r'C:\Users\lahir\Downloads\UCF101\analysis\ucf101_spacial'
+WINDOW = 8
+
+def spacial_metrics(model, gt_class, video, clustered_ids, pairs, gt_class_idx, pred_logit):
+
+    ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
+    clustered_ids_ord = {}
+    for key in ordered_keys:
+        clustered_ids_ord[int(key)] = clustered_ids[key]
+    cluster_frames = [clustered_ids_ord[key][0] for key in clustered_ids_ord]
+    img0_frames = cluster_frames[:-1]
+    img1_frames = cluster_frames[1:]
+
+    img0_batch, img1_batch = torch.empty(0).to(device), torch.empty(0).to(device)
+    for i in range(len(img1_frames)):
+        f0 = img0_frames[i]
+        f1 = img1_frames[i]
+        img0_batch = torch.concatenate([img0_batch,video[f0,:][None,:]])
+        img1_batch = torch.concatenate([img1_batch,video[f1,:][None,:]])
+    
+    flows = raftof.predict_flow_batch(img1_batch, img0_batch)
+
+    v_clus = func.create_new_video(video.permute(1,0,2,3), clustered_ids_ord)
+    for p_idx, p in enumerate(pairs):
+        fname = f'dPred_dF_f_{p[0]},{p[1]}.png'
+        hm_path = os.path.join(mask_path, gt_class, k, fname)
+        hm = Image.open(hm_path)
+        hm = np.array(hm)
+        H,W = hm.shape
+        assert H==W, 'Error: Height must be equal to the Width of the image'
+        hm_re = hm.reshape(H*W)
+        sort_args = np.argsort(hm_re)
+        sort_args = sort_args[::-1] # sort pixels in decending order
+        x = sort_args//H
+        y = sort_args%H
+
+        i0_idx = clustered_ids[str(p[0])][0]
+        i1_idx = clustered_ids[str(p[1])][0]
+        i0 = video[i0_idx,:]
+        i0 = F.interpolate(i0[None,:], size=(hm.shape[0],hm.shape[1]), mode='bilinear', align_corners=False)[0,:]
+        i1 = video[i1_idx,:]
+        i1 = F.interpolate(i1[None,:], size=(hm.shape[0],hm.shape[1]), mode='bilinear', align_corners=False)[0,:]
+        f = flows[p_idx,:]
+
+        #get sorted coodinated for heatmap patches
+        hm_w = func.get_windows(torch.tensor(hm[None,None,:]), WINDOW)
+        hm_sum = torch.sum(hm_w[0,0,:],dim=(0,1))
+        w_H = H//WINDOW
+        hm_sum_1d = hm_sum.view(w_H*w_H)
+        hm_sort_args = torch.argsort(hm_sum_1d)
+        hm_sort_args = torch.flip(hm_sort_args, dims=[0]) # sort in decending order
+        hm_x = hm_sort_args//w_H
+        hm_y = hm_sort_args%w_H
+
+        # testing
+        # sum = hm_sum[None,None,None,None,:].repeat(1,1,8,8,1,1)
+        # sum = (sum - sum.min())/(sum.max() - sum.min())
+        # sum = func.fold_windows(sum , WINDOW, H)[0,0,:]
+        # sum = sum[:,:,None].repeat(1,1,3)
+        # func.overlay_mask(sum, hm)
+
+        f_w = func.get_windows(f[None,:], WINDOW)
+        #remove motion in the important hm areas one by one: deletion test
+        logits = []
+        for idx in range(0, len(hm_sort_args)-1):
+            f_w_ = f_w.clone()
+            f_w_[:,:,:,:,hm_x[0:idx+1],hm_y[0:idx+1]] = 0
+            f_w_re = func.fold_windows(f_w_, WINDOW, H)[:,0,:]
+            i1_mod = func.warp_batch(i0[None,:], f_w_re)
+            ordered_keys = [int(k) for k in ordered_keys]
+            i1_mod = F.interpolate(i1_mod, size=(v_clus.size(2),v_clus.size(3)), mode='bilinear', align_corners=False)[0,:]
+            v_ = func.replace_frame(v_clus, ordered_keys, clustered_ids_ord, p[1], i1_mod)
+            stats = func.get_pred_stats(model, v_, gt_class_idx, pred_logit)
+            l = stats['logit']
+            logits.append(min(1,l/pred_logit))
+        x = np.linspace(0, 1, len(logits))
+        AUC_delete = float(np.trapezoid(logits, x))
+
+        #insert motion in the important hm areas one by one: insertion test
+        logits = []
+        for idx in range(0, len(hm_sort_args)-1):
+            f_w_ = torch.zeros_like(f_w)
+            f_w_[:,:,:,:,hm_x[0:idx+1],hm_y[0:idx+1]] = f_w[:,:,:,:,hm_x[0:idx+1],hm_y[0:idx+1]]
+            f_w_re = func.fold_windows(f_w_, WINDOW, H)[:,0,:]
+            i1_mod = func.warp_batch(i0[None,:], f_w_re)
+            ordered_keys = [int(k) for k in ordered_keys]
+            i1_mod = F.interpolate(i1_mod, size=(v_clus.size(2),v_clus.size(3)), mode='bilinear', align_corners=False)[0,:]
+            v_ = func.replace_frame(v_clus, ordered_keys, clustered_ids_ord, p[1], i1_mod)
+            stats = func.get_pred_stats(model, v_, gt_class_idx, pred_logit)
+            l = stats['logit']
+            logits.append(min(1,l/pred_logit))
+        x = np.linspace(0, 1, len(logits))
+        AUC_insert = float(np.trapezoid(logits, x))
+
+        #random tests
+        indices = torch.randperm(hm_x.size(0))
+        hm_x = hm_x[indices]
+        hm_y = hm_y[indices]
+        logits = []
+        for idx in range(0, len(hm_sort_args)-1):
+            f_w_ = f_w.clone()
+            f_w_[:,:,:,:,hm_x[0:idx+1],hm_y[0:idx+1]] = 0
+            f_w_re = func.fold_windows(f_w_, WINDOW, H)[:,0,:]
+            i1_mod = func.warp_batch(i0[None,:], f_w_re)
+            ordered_keys = [int(k) for k in ordered_keys]
+            i1_mod = F.interpolate(i1_mod, size=(v_clus.size(2),v_clus.size(3)), mode='bilinear', align_corners=False)[0,:]
+            v_ = func.replace_frame(v_clus, ordered_keys, clustered_ids_ord, p[1], i1_mod)
+            stats = func.get_pred_stats(model, v_, gt_class_idx, pred_logit)
+            l = stats['logit']
+            logits.append(min(1,l/pred_logit))
+        x = np.linspace(0, 1, len(logits))
+        AUC_delete_r = float(np.trapezoid(logits, x))
+
+        logits = []
+        for idx in range(0, len(hm_sort_args)-1):
+            f_w_ = torch.zeros_like(f_w)
+            f_w_[:,:,:,:,hm_x[0:idx+1],hm_y[0:idx+1]] = f_w[:,:,:,:,hm_x[0:idx+1],hm_y[0:idx+1]]
+            f_w_re = func.fold_windows(f_w_, WINDOW, H)[:,0,:]
+            i1_mod = func.warp_batch(i0[None,:], f_w_re)
+            ordered_keys = [int(k) for k in ordered_keys]
+            i1_mod = F.interpolate(i1_mod, size=(v_clus.size(2),v_clus.size(3)), mode='bilinear', align_corners=False)[0,:]
+            v_ = func.replace_frame(v_clus, ordered_keys, clustered_ids_ord, p[1], i1_mod)
+            stats = func.get_pred_stats(model, v_, gt_class_idx, pred_logit)
+            l = stats['logit']
+            logits.append(min(1,l/pred_logit))
+        x = np.linspace(0, 1, len(logits))
+        AUC_insert_r = float(np.trapezoid(logits, x))
 
 def calc_spacial_metrics_UCF101():
-    analysis_path = r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_motion_importance.json'
-    output_path = r'C:\Users\lahir\Downloads\UCF101\analysis\ucf101_spacial'
-    mask_path = r'C:\Users\lahir\Downloads\UCF101\analysis\ucf101_spacial'
-    WINDOW = 8
-
     #create model and data loader
     ucf101dm = func.UCF101_data_model()
     model = ucf101dm.model
@@ -374,19 +497,18 @@ def calc_spacial_metrics_UCF101():
         cls_name = class_names[k]
         class_labels[cls_name.lower()] = k
 
-    with open(analysis_path, 'r', encoding='utf-8') as file:
-        data_dict = json.load(file)
-    
-    keys = [k for k in data_dict.keys() if k not in ['accuracy','threshold']]
-    for i, k in enumerate(keys):
-        print(f'Processing sample {i+1}/{len(data_dict)}: {k}', end='\r')
+    if os.path.exists(analysis_path):
+        data = func.read_json_line(analysis_path)
 
-        d = data_dict[k]
+    for i, d_ in enumerate(data):
+        print(f'Processing sample {i+1}/{len(data)}: {k}', end='\r')
+        k = list(d_.keys())[0]
+        d = d_[k]
+
         if d['single_frame_structure']:
             continue
 
         gt_class = d['motion_importance']['gt_class']
-        print(f'Class: {gt_class}')
         gt_class_idx = class_labels[gt_class.lower()]
         pred_logit = d['motion_importance']['pred_original_logit']
         pred_class = d['motion_importance']['pred_original_class']
@@ -411,109 +533,10 @@ def calc_spacial_metrics_UCF101():
 
         #create img batches for flow and generate flow for the motion pairs
         clustered_ids = d['pair_analysis']['clustered_ids']
-        ordered_keys = list(dict(sorted(clustered_ids.items(), key=lambda x: x[1][0])).keys())
-        clustered_ids_ord = {}
-        for key in ordered_keys:
-            clustered_ids_ord[int(key)] = clustered_ids[key]
-        cluster_frames = [clustered_ids_ord[key][0] for key in clustered_ids_ord]
-        img0_frames = cluster_frames[:-1]
-        img1_frames = cluster_frames[1:]
-
-        img0_batch, img1_batch = torch.empty(0).to(device), torch.empty(0).to(device)
-        for i in range(len(img1_frames)):
-            f0 = img0_frames[i]
-            f1 = img1_frames[i]
-            img0_batch = torch.concatenate([img0_batch,video[f0,:][None,:]])
-            img1_batch = torch.concatenate([img1_batch,video[f1,:][None,:]])
-        
-        flows = raftof.predict_flow_batch(img1_batch, img0_batch)
-
-        v_clus = func.create_new_video(video.permute(1,0,2,3), clustered_ids_ord)
-        for p_idx, p in enumerate(pairs):
-            fname = f'dPred_dF_f_{p[0]},{p[1]}.png'
-            hm_path = os.path.join(mask_path, gt_class, k, fname)
-            hm = Image.open(hm_path)
-            hm = np.array(hm)
-            H,W = hm.shape
-            assert H==W, 'Error: Height must be equal to the Width of the image'
-            hm_re = hm.reshape(H*W)
-            sort_args = np.argsort(hm_re)
-            sort_args = sort_args[::-1] # sort pixels in decending order
-            x = sort_args//H
-            y = sort_args%H
-
-            i0_idx = clustered_ids[str(p[0])][0]
-            i1_idx = clustered_ids[str(p[1])][0]
-            i0 = video[i0_idx,:]
-            i0 = F.interpolate(i0[None,:], size=(hm.shape[0],hm.shape[1]), mode='bilinear', align_corners=False)[0,:]
-            i1 = video[i1_idx,:]
-            i1 = F.interpolate(i1[None,:], size=(hm.shape[0],hm.shape[1]), mode='bilinear', align_corners=False)[0,:]
-            f = flows[p_idx,:]
-
-            #get sorted coodinated for heatmap patches
-            hm_w = func.get_windows(torch.tensor(hm[None,None,:]), WINDOW)
-            hm_sum = torch.sum(hm_w[0,0,:],dim=(0,1))
-            w_H = H//WINDOW
-            hm_sum_1d = hm_sum.view(w_H*w_H)
-            hm_sort_args = torch.argsort(hm_sum_1d)
-            hm_sort_args = torch.flip(hm_sort_args, dims=[0]) # sort in decending order
-            hm_x = hm_sort_args//w_H
-            hm_y = hm_sort_args%w_H
-
-            # testing
-            # sum = hm_sum[None,None,None,None,:].repeat(1,1,8,8,1,1)
-            # sum = (sum - sum.min())/(sum.max() - sum.min())
-            # sum = func.fold_windows(sum , WINDOW, H)[0,0,:]
-            # sum = sum[:,:,None].repeat(1,1,3)
-            # func.overlay_mask(sum, hm)
-
-            f_w = func.get_windows(f[None,:], WINDOW)
-            #remove motion in the important hm areas one by one: deletion test
-            logits = []
-            for idx in range(0, len(hm_sort_args)-1):
-                f_w_ = f_w.clone()
-                f_w_[:,:,:,:,hm_x[0:idx+1],hm_y[0:idx+1]] = 0
-                f_w_re = func.fold_windows(f_w_, WINDOW, H)[:,0,:]
-                i1_mod = func.warp_batch(i0[None,:], f_w_re)
-                ordered_keys = [int(k) for k in ordered_keys]
-                i1_mod = F.interpolate(i1_mod, size=(v_clus.size(2),v_clus.size(3)), mode='bilinear', align_corners=False)[0,:]
-                v_ = func.replace_frame(v_clus, ordered_keys, clustered_ids_ord, p[1], i1_mod)
-                stats = func.get_pred_stats(model, v_, gt_class_idx, pred_logit)
-                l = stats['logit']
-                logits.append(l)
-            x = np.linspace(0, 1, len(logits))
-            AUC_delete = float(np.trapezoid(logits, x))
-
-            logits = []
-            for idx in range(0, len(hm_sort_args)-1):
-                f_w_ = torch.zeros_like(f_w)
-                f_w_[:,:,:,:,hm_x[0:idx+1],hm_y[0:idx+1]] = f_w[:,:,:,:,hm_x[0:idx+1],hm_y[0:idx+1]]
-                f_w_re = func.fold_windows(f_w_, WINDOW, H)[:,0,:]
-                i1_mod = func.warp_batch(i0[None,:], f_w_re)
-                ordered_keys = [int(k) for k in ordered_keys]
-                i1_mod = F.interpolate(i1_mod, size=(v_clus.size(2),v_clus.size(3)), mode='bilinear', align_corners=False)[0,:]
-                v_ = func.replace_frame(v_clus, ordered_keys, clustered_ids_ord, p[1], i1_mod)
-                stats = func.get_pred_stats(model, v_, gt_class_idx, pred_logit)
-                l = stats['logit']
-                logits.append(l)
-            x = np.linspace(0, 1, len(logits))
-            AUC_insert = float(np.trapezoid(logits, x))
 
 
 
 
-                # fmag = torch.sum(f_w_re[:,0,:]**2,dim=0)**0.5
-                # func.show_gray_image(fmag.cpu().numpy())
-
-                # sum = hm_sum[None,None,None,None,:].repeat(1,1,8,8,1,1)
-                # sum = (sum - sum.min())/(sum.max() - sum.min())
-                # sum = func.fold_windows(sum , WINDOW, H)[0,0,:]
-                # sum = sum[:,:,None].repeat(1,1,3)
-                # func.overlay_mask(sum, fmag.cpu().numpy())
-
-                # i0_warp = func.warp_batch(i0[None,:], f)[0,:]
-                # v = torch.stack([i0,i1_mod[0,:]])
-                # func.play_tensor_video_opencv(v,fps=1)
 
 
 '''
@@ -526,5 +549,5 @@ def calc_spacial_metrics_UCF101():
     
 
 if __name__ == '__main__':
-    calc_temporal_metrics_UCF101()
+    calc_spacial_metrics_UCF101()
 

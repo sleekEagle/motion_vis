@@ -194,8 +194,8 @@ def basic_stats():
     print('*************************************************************************')
 
 
-def temporal_metrics():
-    output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\UCF101_temporal_metrics.json')
+def temporal_metrics(threshold = -100):
+    output_path = Path(r'C:\Users\lahir\Downloads\UCF101\analysis\ssv2_temporal_metrics.json')
     if os.path.exists(output_path):
         data = func.read_json_line(output_path)
     
@@ -225,17 +225,22 @@ def temporal_metrics():
             no_m_l = dict['no_motion_logit']
             motion_l = dict['all_motion_logit']
             per_change = (motion_l-no_m_l)/motion_l
-            if per_change>0.03:
+            if per_change>threshold:
                 for key in avg_metrics:
                     avg_metrics[key] += dict[key]
                 count += 1
     
+    print(f'Threshold: {threshold}')
     for k in avg_metrics:
-        print(f'{k}: {avg_metrics[k]/count}')
+        print(f'{k}')
+    for k in avg_metrics:
+        print(f'{avg_metrics[k]/count}')
+    print(f'count: {count}')
+    print('**********************************************')
     
 
 if __name__ == '__main__':
-    temporal_metrics()
+    temporal_metrics(threshold=0.3)
 
 
 
